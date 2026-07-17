@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#07111f" />
+    <meta name="description" content="UpTier is a local-first financial freedom workspace for portfolio, dividend, budget, and calendar planning." />
+    <meta property="og:title" content="UpTier | Financial freedom, made visible" />
+    <meta property="og:description" content="A local-first Windows workspace for understanding your portfolio, dividend income, budget, and progress." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://dhunter6409.github.io/uptier-site/" />
+    <meta property="og:image" content="https://dhunter6409.github.io/uptier-site/assets/uptier-mark.png" />
+    <link rel="canonical" href="https://dhunter6409.github.io/uptier-site/" />
+    <link rel="icon" type="image/png" href="assets/uptier-mark.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>UpTier | Financial freedom, made visible</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="shell nav-wrap">
+        <a class="brand" href="./" aria-label="UpTier home">
+          <img src="assets/uptier-mark.png" alt="" width="44" height="44" />
+          <span><strong>UpTier</strong><small>Financial freedom workspace</small></span>
+        </a>
+        <nav aria-label="Primary navigation">
+          <a href="#product">Product</a>
+          <a href="#plaid">Plaid connection</a>
+          <a href="privacy/">Privacy</a>
+          <a class="nav-cta" href="support/">Support</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero shell">
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span> Windows release candidate</p>
+          <h1>Build the income that buys back your time.</h1>
+          <p class="hero-lede">UpTier brings portfolio value, dividend forecasts, recurring bills, pay periods, and financial-freedom progress into one calm, local-first workspace.</p>
+          <div class="actions">
+            <a class="button primary" href="#plaid">How connected portfolios work</a>
+            <a class="button secondary" href="privacy/">Read the privacy policy</a>
+          </div>
+          <p class="hero-note">No UpTier account is required for local Windows features. UpTier is planning software—not a broker, bank, or investment adviser.</p>
+        </div>
+
+        <div class="product-window" aria-label="Illustration of the UpTier product workspace">
+          <div class="window-bar"><i></i><i></i><i></i><span>Freedom command center</span></div>
+          <div class="window-body">
+            <aside aria-hidden="true">
+              <div class="mini-brand"><img src="assets/uptier-mark.png" alt="" /><b>UpTier</b></div>
+              <span class="active">Overview</span><span>Portfolio</span><span>Dividends</span><span>Budget</span><span>Calendar</span>
+            </aside>
+            <div class="window-content">
+              <div class="preview-heading"><div><small>FREEDOM ENGINE</small><h2>Your progress, in focus.</h2></div><b>Local-first</b></div>
+              <div class="metric-grid">
+                <article><small>PORTFOLIO</small><strong>One clear view</strong><span>Positions and invested value</span></article>
+                <article><small>INCOME</small><strong>12-month outlook</strong><span>Dividend rhythm and DRIP</span></article>
+                <article><small>BUDGET</small><strong>30-day forecast</strong><span>Paychecks, bills, and cash safety</span></article>
+              </div>
+              <div class="preview-track"><div class="track-label"><b>Financial freedom journey</b><span>Progress over market noise</span></div><div class="track-line"><i></i></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="product" class="section shell">
+        <div class="section-heading">
+          <p class="eyebrow">ONE FINANCIAL PICTURE</p>
+          <h2>Designed around the decisions you make every month.</h2>
+          <p>UpTier connects the numbers that are usually scattered across broker exports, statements, spreadsheets, and calendars.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card"><span class="feature-number">01</span><h3>Portfolio clarity</h3><p>Import and reconcile broker CSV files, track invested value, review allocation, and keep ambiguous rows from silently duplicating holdings.</p></article>
+          <article class="feature-card"><span class="feature-number">02</span><h3>Dividend intelligence</h3><p>Use confirmed payment history to build monthly or quarterly schedules, project the next 12 months, and model optional dividend reinvestment.</p></article>
+          <article class="feature-card"><span class="feature-number">03</span><h3>Budget foresight</h3><p>See actual upcoming pay periods, recurring bills, debts, and the lowest projected cash point across the next 30 days.</p></article>
+          <article class="feature-card"><span class="feature-number">04</span><h3>A useful calendar</h3><p>Bring estimated dividends, confirmed payouts, income, bills, and debt payments together without turning the calendar into an activity log.</p></article>
+          <article class="feature-card"><span class="feature-number">05</span><h3>Local profile vault</h3><p>Keep financial profiles encrypted on the device, with each profile isolated and its key protected for the current Windows user.</p></article>
+          <article class="feature-card"><span class="feature-number">06</span><h3>Progress that matters</h3><p>Measure invested capital, passive income, milestones, and financial-freedom progress instead of reacting to daily market noise.</p></article>
+        </div>
+      </section>
+
+      <section id="plaid" class="section plaid-section">
+        <div class="shell plaid-layout">
+          <div>
+            <p class="eyebrow">OPTIONAL CONNECTED PORTFOLIO</p>
+            <h2>A user-controlled path from Plaid to UpTier.</h2>
+            <p class="section-copy">UpTier's Plaid Investments integration is currently being validated with Sandbox data. A production connection will not be offered until provider review, security, and release requirements are complete.</p>
+            <div class="status-pill"><span></span> Sandbox integration under validation</div>
+          </div>
+          <ol class="connection-steps">
+            <li><span>1</span><div><h3>You choose to connect</h3><p>UpTier opens Plaid's hosted connection experience. The desktop app never asks for or stores brokerage login credentials.</p></div></li>
+            <li><span>2</span><div><h3>The backend normalizes supported data</h3><p>A secure UpTier backend requests authorized investment holdings and supported transaction history. Plaid secrets and access tokens stay off the desktop.</p></div></li>
+            <li><span>3</span><div><h3>You import into your local profile</h3><p>UpTier reconciles supported positions and investment-income history into the encrypted profile on your device for review and planning.</p></div></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section shell trust-layout">
+        <div class="section-heading compact"><p class="eyebrow">DATA PRINCIPLES</p><h2>Your information should have a clear purpose.</h2></div>
+        <div class="trust-grid">
+          <article><h3>Local by default</h3><p>Portfolio, budget, calendar, and planning data stay in the local encrypted profile unless you deliberately use an optional provider.</p></article>
+          <article><h3>No advertising profile</h3><p>The current Windows app has no behavioral advertising, third-party analytics, or automatic crash-report uploads.</p></article>
+          <article><h3>No sale of personal data</h3><p>UpTier does not sell personal information. Optional providers receive only the information needed for the feature you choose to use.</p></article>
+          <article><h3>Documented deletion path</h3><p>Local and connected-data removal instructions are public and available without signing in.</p><a href="data-deletion/">View deletion instructions →</a></article>
+        </div>
+      </section>
+
+      <section class="section shell readiness-card">
+        <div><p class="eyebrow">CURRENT AVAILABILITY</p><h2>Preparing for an outside-user Windows beta.</h2><p>UpTier is a release candidate under active validation. Microsoft Store packaging, installed upgrade testing, full-profile backup and restore, provider approval, and production support remain release gates.</p></div>
+        <a class="button secondary" href="support/">Contact support</a>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell footer-grid">
+        <div class="footer-brand"><img src="assets/uptier-mark.png" alt="" width="42" height="42" /><div><b>UpTier</b><span>Financial freedom, made visible.</span></div></div>
+        <nav aria-label="Legal and support"><a href="privacy/">Privacy</a><a href="terms/">Terms</a><a href="support/">Support</a><a href="data-deletion/">Data deletion</a></nav>
+        <p>© 2026 UpTier. All rights reserved.</p>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,46 @@
+name: Product support
+description: Report a non-sensitive UpTier problem.
+title: "[Support]: "
+labels: [support]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never attach statements, broker exports, account numbers, credentials, tokens, API keys, or screenshots containing private financial information.
+  - type: input
+    id: version
+    attributes:
+      label: UpTier version
+      placeholder: 0.25.2
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+    validations:
+      required: true
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build type
+      options:
+        - Installed Windows app
+        - Microsoft Store test package
+        - Visual Studio/development build
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include the page, action, exact error, and safe steps to reproduce. Use invented sample data only.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I confirm this report contains no sensitive financial information or credentials.
+          required: true

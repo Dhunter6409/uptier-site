@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://dhunter6409.github.io/uptier-site/sitemap.xml

@@ -1,0 +1,35 @@
+name: Connected-data deletion request
+description: Start a deletion request without posting sensitive information.
+title: "[Deletion request]"
+labels: [privacy, deletion-request]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is public. Do not include your name, email, phone number, institution, account information, Plaid identifiers, credentials, tokens, statements, or screenshots. Support will provide private verification instructions.
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection type
+      options:
+        - Plaid Sandbox test
+        - Other UpTier connected-portfolio test
+        - Unsure
+    validations:
+      required: true
+  - type: input
+    id: date
+    attributes:
+      label: Approximate connection date
+      placeholder: Month and year only
+    validations:
+      required: true
+  - type: checkboxes
+    id: request
+    attributes:
+      label: Request
+      options:
+        - label: I request deletion of connected-service data controlled by UpTier and need private verification instructions.
+          required: true
+        - label: I confirm this public issue contains no personal or financial identifiers.
+          required: true
