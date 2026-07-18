@@ -52,10 +52,12 @@ if (/github\.com\/Dhunter6409\/UpTier(?:\/|\.git|["'\s]|$)/i.test(publicText)) {
 }
 
 for (const required of [
-  'Sandbox integration under validation',
+  'Sandbox and private Trial under validation',
+  'invitation-only real-data Trial',
   'UpTier does not sell personal information',
   'Data Deletion',
-  'Open a support request'
+  'uptier.support@gmail.com',
+  'Email private support'
 ]) {
   if (!publicText.includes(required)) errors.push(`Missing required public content: ${required}`);
 }
