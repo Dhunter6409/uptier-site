@@ -17,6 +17,19 @@ function walk(directory) {
 const files = walk(root);
 const htmlFiles = files.filter((file) => extname(file) === '.html');
 
+const previewIndexPath = join(root, 'app-preview', 'index.html');
+if (!existsSync(previewIndexPath)) {
+  errors.push('Missing public mobile preview entry page.');
+} else {
+  const previewIndex = readFileSync(previewIndexPath, 'utf8');
+  if (!/<meta\s[^>]*name="robots"\s[^>]*content="noindex,nofollow"/i.test(previewIndex)) {
+    errors.push('Mobile preview must remain excluded from search indexing.');
+  }
+  if (/@vite\/client|react-refresh/i.test(previewIndex)) {
+    errors.push('Mobile preview must use the production renderer, not development startup scripts.');
+  }
+}
+
 for (const file of htmlFiles) {
   const content = readFileSync(file, 'utf8');
   if (!/^<!doctype html>/i.test(content)) errors.push(`${file}: missing HTML doctype`);
