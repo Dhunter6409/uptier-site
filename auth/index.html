@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#07111f" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="description" content="Secure UpTier account sign-in with verified email and SMS multi-factor authentication." />
+    <link rel="icon" type="image/png" href="../assets/uptier-mark.png" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Secure account sign-in | UpTier</title>
+  </head>
+  <body class="auth-page">
+    <a class="skip-link" href="#main">Skip to sign-in</a>
+    <header class="auth-header">
+      <a class="brand" href="../" aria-label="UpTier home">
+        <img src="../assets/uptier-mark.png" alt="" width="48" height="48" />
+        <span><strong>UpTier</strong><small>Secure account access</small></span>
+      </a>
+      <span class="auth-security-label">Verified email + SMS MFA</span>
+    </header>
+
+    <main id="main" class="auth-shell">
+      <section class="auth-intro" aria-labelledby="auth-title">
+        <p class="eyebrow">SECURE CONNECTED PORTFOLIO</p>
+        <h1 id="auth-title">Sign in without sharing credentials with the desktop app.</h1>
+        <p id="auth-lead">Google Identity verifies your email and second factor in this browser. UpTier receives only a short-lived identity proof and exchanges it for its own protected session.</p>
+        <ul>
+          <li>Your Google password and SMS code are never sent to the UpTier desktop app.</li>
+          <li>The Firebase session uses memory-only persistence and is signed out after the exchange.</li>
+          <li>Standard SMS and data rates may apply. Google uses phone numbers for abuse prevention.</li>
+        </ul>
+        <p id="delete-warning" class="auth-delete-warning" hidden><strong>This action is permanent.</strong> Connected Plaid Items, UpTier server data, sessions, and the Google Identity record will be removed. Portfolio and Budget records already imported into the local encrypted profile are not deleted by this cloud action.</p>
+      </section>
+
+      <section class="auth-card" aria-labelledby="form-title">
+        <div class="auth-card-heading">
+          <div><p class="eyebrow">UPTIER ACCOUNT</p><h2 id="form-title">Continue securely</h2></div>
+          <span id="request-state" class="request-state">Checking request</span>
+        </div>
+
+        <div id="status" class="auth-status" role="status" aria-live="polite">Validating the request from UpTier…</div>
+
+        <form id="account-form" class="auth-form" hidden>
+          <label>Email address<input id="email" name="email" type="email" autocomplete="username" maxlength="254" required /></label>
+          <label>Password<input id="password" name="password" type="password" autocomplete="current-password" minlength="12" maxlength="128" required /></label>
+          <div class="auth-actions">
+            <button id="sign-in" class="auth-button primary" type="submit">Sign in</button>
+            <button id="create-account" class="auth-button secondary" type="button">Create private-trial account</button>
+          </div>
+          <button id="resend-verification" class="auth-text-button" type="button">Resend verification email</button>
+          <button id="reset-password" class="auth-text-button" type="button">Send password reset email</button>
+        </form>
+
+        <form id="enroll-form" class="auth-form" hidden>
+          <div class="auth-callout"><strong>Protect this account</strong><span>Your email is verified. Add an SMS second factor to continue.</span></div>
+          <label>Mobile number<input id="phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" placeholder="+1 555 555 0123" maxlength="24" required /></label>
+          <label class="auth-consent"><input id="sms-consent" type="checkbox" required /><span>I agree to receive a one-time security text. Standard message and data rates may apply.</span></label>
+          <button id="send-enrollment-code" class="auth-button primary" type="submit">Send security code</button>
+        </form>
+
+        <form id="code-form" class="auth-form" hidden>
+          <div class="auth-callout"><strong id="code-title">Enter security code</strong><span id="code-help">Enter the six-digit code sent to your phone.</span></div>
+          <label>Six-digit code<input id="sms-code" name="sms-code" type="text" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required /></label>
+          <button id="verify-code" class="auth-button primary" type="submit">Verify code</button>
+        </form>
+
+        <div id="complete-panel" class="auth-complete" hidden>
+          <div class="complete-mark" aria-hidden="true">✓</div>
+          <h2 id="complete-title">Secure sign-in complete</h2>
+          <p id="complete-message">Return to UpTier. The desktop app will finish automatically.</p>
+        </div>
+
+        <div id="recaptcha-container" class="recaptcha-container"></div>
+        <p class="auth-legal">By continuing, you agree to the <a href="../terms/">Terms</a> and acknowledge the <a href="../privacy/">Privacy Policy</a>. Need help? <a href="mailto:uptier.support@gmail.com">uptier.support@gmail.com</a></p>
+      </section>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
