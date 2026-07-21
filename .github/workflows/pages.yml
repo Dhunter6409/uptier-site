@@ -31,7 +31,7 @@ jobs:
         run: |
           mkdir _site
           cp index.html styles.css 404.html robots.txt sitemap.xml _site/
-          cp -r assets privacy terms support data-deletion _site/
+          cp -r assets privacy terms support data-deletion app-preview _site/
           touch _site/.nojekyll
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
