@@ -30,6 +30,17 @@ if (!existsSync(previewIndexPath)) {
   }
 }
 
+const authConfigPath = join(root, 'auth', 'config.js');
+const productionBackendOrigin = 'https://uptier-plaid-backend-1076418370349.us-central1.run.app';
+if (!existsSync(authConfigPath)) {
+  errors.push('Missing secure account portal configuration.');
+} else {
+  const authConfig = readFileSync(authConfigPath, 'utf8');
+  if (!authConfig.includes(`'${productionBackendOrigin}'`)) {
+    errors.push('Secure account portal must allow the deployed UpTier backend origin.');
+  }
+}
+
 for (const file of htmlFiles) {
   const content = readFileSync(file, 'utf8');
   if (!/^<!doctype html>/i.test(content)) errors.push(`${file}: missing HTML doctype`);
