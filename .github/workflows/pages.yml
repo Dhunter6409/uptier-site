@@ -31,8 +31,16 @@ jobs:
         run: |
           mkdir _site
           cp index.html styles.css 404.html robots.txt sitemap.xml _site/
-          cp -r assets privacy terms support data-deletion app-preview _site/
+          cp -r assets auth privacy terms support data-deletion app-preview _site/
           touch _site/.nojekyll
+      - name: Verify staged account and legal pages
+        run: |
+          test -f _site/auth/index.html
+          test -f _site/auth/app.js
+          test -f _site/auth/config.js
+          test -f _site/privacy/index.html
+          test -f _site/terms/index.html
+          test -f _site/data-deletion/index.html
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
