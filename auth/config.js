@@ -10,6 +10,7 @@ export const firebaseConfig = Object.freeze({
 });
 
 export const allowedBackendOrigins = Object.freeze([
-  // Development-only loopback origin. Production will add its HTTPS API origin before launch.
+  'https://uptier-plaid-backend-1076418370349.us-central1.run.app',
+  // Development-only loopback origin retained for local portal testing.
   'http://127.0.0.1:8788'
 ]);
