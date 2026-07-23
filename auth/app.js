@@ -42,7 +42,8 @@ const elements = {
   deleteWarning: document.querySelector('#delete-warning'),
   formTitle: document.querySelector('#form-title'),
   completeTitle: document.querySelector('#complete-title'),
-  completeMessage: document.querySelector('#complete-message')
+  completeMessage: document.querySelector('#complete-message'),
+  completeNote: document.querySelector('.complete-note')
 };
 
 const parameters = new URLSearchParams(window.location.search);
@@ -57,6 +58,7 @@ let recaptchaVerifier;
 let verificationId = '';
 let verificationMode = '';
 let signInResolver;
+let flowCompleted = false;
 
 function setStatus(message, tone = 'working') {
   elements.status.textContent = message;
@@ -70,7 +72,30 @@ function showPanel(panel) {
 }
 
 function setBusy(busy) {
-  for (const button of document.querySelectorAll('button')) button.disabled = busy;
+  for (const button of document.querySelectorAll('button')) button.disabled = busy || flowCompleted;
+}
+
+function finishFlow({ title, message, note, status, requestState, tone = 'success' }) {
+  flowCompleted = true;
+  verificationId = '';
+  verificationMode = '';
+  signInResolver = undefined;
+  recaptchaVerifier?.clear();
+  recaptchaVerifier = undefined;
+  elements.email.value = '';
+  elements.password.value = '';
+  elements.phone.value = '';
+  elements.smsCode.value = '';
+  elements.requestState.textContent = requestState;
+  elements.requestState.dataset.tone = tone;
+  elements.completeTitle.textContent = title;
+  elements.completeMessage.textContent = message;
+  elements.completeNote.textContent = note;
+  setStatus(status, tone);
+  document.body.classList.add('auth-flow-complete');
+  showPanel(elements.completePanel);
+  setBusy(true);
+  elements.completePanel.focus();
 }
 
 function cleanError(error) {
@@ -164,20 +189,23 @@ async function finishBackendExchange(user, apiOrigin) {
     try {
       await deleteUser(user);
     } catch {
-      elements.requestState.textContent = 'Server data deleted';
-      elements.requestState.dataset.tone = 'error';
-      setStatus('UpTier server data and Plaid connections were deleted, but the Google Identity record could not be removed. Contact uptier.support@gmail.com for identity cleanup.', 'error');
-      elements.completeTitle.textContent = 'Server data deleted';
-      elements.completeMessage.textContent = 'Do not reconnect this identity. Contact private support to finish removing the remaining Google Identity record.';
-      showPanel(elements.completePanel);
+      finishFlow({
+        title: 'Server data deleted',
+        message: 'Do not reconnect this identity. Contact UpTier support to finish removing the remaining Google Identity record.',
+        note: 'This completed deletion request cannot be submitted again.',
+        status: 'UpTier server data and Plaid connections were deleted, but the Google Identity record could not be removed. Contact uptier.support@gmail.com for identity cleanup.',
+        requestState: 'Server data deleted',
+        tone: 'error'
+      });
       return;
     }
-    elements.requestState.textContent = 'Deleted';
-    elements.requestState.dataset.tone = 'success';
-    setStatus('The UpTier cloud account, connected Plaid Items, server data, sessions, and Google Identity record were deleted.', 'success');
-    elements.completeTitle.textContent = 'Account deletion complete';
-    elements.completeMessage.textContent = 'Return to UpTier. The desktop app will clear its protected session automatically. Local imported records remain until you delete them locally.';
-    showPanel(elements.completePanel);
+    finishFlow({
+      title: 'Account deletion complete',
+      message: 'Return to the UpTier app now. The app will clear its protected session automatically.',
+      note: 'You can close this browser tab. Local imported records remain until you delete them locally.',
+      status: 'The UpTier cloud account, connected Plaid Items, server data, sessions, and Google Identity record were deleted.',
+      requestState: 'Deleted'
+    });
     return;
   }
   setStatus('SMS verified. Creating a protected UpTier session…');
@@ -193,10 +221,13 @@ async function finishBackendExchange(user, apiOrigin) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof payload.message === 'string' ? payload.message : 'UpTier could not complete this sign-in.');
   await signOut(auth);
-  elements.requestState.textContent = 'Verified';
-  elements.requestState.dataset.tone = 'success';
-  setStatus('Identity verified and exchanged. No Google session remains on this page.', 'success');
-  showPanel(elements.completePanel);
+  finishFlow({
+    title: 'You’re signed in',
+    message: 'Return to the UpTier app now. UpTier will finish signing you in automatically.',
+    note: 'You can close this browser tab. This completed request cannot be used to sign in again.',
+    status: 'Identity verified and exchanged. No Google session remains on this page.',
+    requestState: 'Verified'
+  });
 }
 
 async function handlePrimarySignIn(apiOrigin) {
@@ -257,6 +288,7 @@ try {
 
 elements.accountForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (flowCompleted) return;
   setBusy(true);
   setStatus('Checking your account…');
   try { await handlePrimarySignIn(apiOrigin); }
@@ -265,6 +297,7 @@ elements.accountForm.addEventListener('submit', async (event) => {
 });
 
 elements.createAccount.addEventListener('click', async () => {
+  if (flowCompleted) return;
   setBusy(true);
   setStatus('Creating the private-trial identity…');
   try {
@@ -278,6 +311,7 @@ elements.createAccount.addEventListener('click', async () => {
 });
 
 elements.resendVerification.addEventListener('click', async () => {
+  if (flowCompleted) return;
   const email = elements.email.value.trim().toLowerCase();
   const password = elements.password.value;
   if (!email || !password) return setStatus('Enter your email address and password before requesting another verification email.', 'error');
@@ -300,6 +334,7 @@ elements.resendVerification.addEventListener('click', async () => {
 });
 
 elements.resetPassword.addEventListener('click', async () => {
+  if (flowCompleted) return;
   const email = elements.email.value.trim().toLowerCase();
   if (!email) return setStatus('Enter your email address first.', 'error');
   setBusy(true);
@@ -312,6 +347,7 @@ elements.resetPassword.addEventListener('click', async () => {
 
 elements.enrollForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (flowCompleted) return;
   if (!elements.smsConsent.checked) return setStatus('Consent is required before sending a security text.', 'error');
   const user = auth.currentUser;
   if (!user?.emailVerified) return setStatus('Sign in with a verified email before adding SMS MFA.', 'error');
@@ -329,6 +365,7 @@ elements.enrollForm.addEventListener('submit', async (event) => {
 
 elements.codeForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (flowCompleted) return;
   if (!/^\d{6}$/.test(elements.smsCode.value)) return setStatus('Enter the six-digit security code.', 'error');
   setBusy(true);
   setStatus('Verifying the security code…');
