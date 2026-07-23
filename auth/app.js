@@ -76,23 +76,34 @@ function setBusy(busy) {
 function cleanError(error) {
   const code = typeof error?.code === 'string' ? error.code : '';
   const messages = {
+    'auth/api-key-not-valid': 'UpTier secure identity configuration is unavailable. Contact UpTier support.',
+    'auth/app-not-authorized': 'This UpTier sign-in page is not authorized to use the secure identity service. Contact UpTier support.',
     'auth/email-already-in-use': 'An account already uses that email. Sign in instead.',
     'auth/billing-not-enabled': 'Google billing is not active for SMS verification yet. Check the UpTier Google Cloud billing status and retry after activation.',
     'auth/captcha-check-failed': 'The reCAPTCHA check was not completed. Retry and finish the visible challenge.',
     'auth/invalid-credential': 'The email or password was not accepted.',
+    'auth/invalid-login-credentials': 'The email or password was not accepted.',
+    'auth/user-not-found': 'The email or password was not accepted.',
+    'auth/wrong-password': 'The email or password was not accepted.',
     'auth/invalid-email': 'Enter a valid email address.',
     'auth/invalid-phone-number': 'Enter a valid mobile number including country code, such as +1.',
     'auth/invalid-verification-code': 'That security code was not accepted. Check it and try again.',
     'auth/missing-verification-code': 'Enter the six-digit security code.',
     'auth/operation-not-allowed': 'SMS verification is not currently enabled for this UpTier project.',
+    'auth/internal-error': 'The secure identity service returned an unexpected error. Wait a moment and retry.',
     'auth/network-request-failed': 'The secure identity service could not be reached. Check your connection and retry.',
     'auth/quota-exceeded': 'The SMS security limit was reached. Wait and try again later.',
     'auth/requires-recent-login': 'For security, sign out and sign in again before changing MFA.',
     'auth/too-many-requests': 'Too many attempts were made. Wait and try again later.',
+    'auth/unauthorized-domain': 'This UpTier sign-in address is not authorized. Contact UpTier support.',
     'auth/user-disabled': 'This account is disabled. Contact UpTier support.',
     'auth/weak-password': 'Use a stronger password with at least 12 characters.'
   };
-  return messages[code] ?? 'Secure sign-in could not be completed. Retry or contact UpTier support.';
+  if (messages[code]) return messages[code];
+  const supportCode = code.replace(/^auth\//, '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);
+  return supportCode
+    ? `Secure sign-in could not be completed. Contact UpTier support with code: ${supportCode}.`
+    : 'Secure sign-in could not be completed. Retry or contact UpTier support.';
 }
 
 function validateLaunchRequest() {
