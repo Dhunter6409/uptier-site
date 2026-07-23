@@ -67,10 +67,11 @@
           <button id="verify-code" class="auth-button primary" type="submit">Verify code</button>
         </form>
 
-        <div id="complete-panel" class="auth-complete" hidden>
+        <div id="complete-panel" class="auth-complete" tabindex="-1" hidden>
           <div class="complete-mark" aria-hidden="true">✓</div>
-          <h2 id="complete-title">Secure sign-in complete</h2>
-          <p id="complete-message">Return to UpTier. The desktop app will finish automatically.</p>
+          <h2 id="complete-title">You’re signed in</h2>
+          <p id="complete-message">Return to the UpTier app now. UpTier will finish signing you in automatically.</p>
+          <p class="complete-note">You can close this browser tab. This completed request cannot be used to sign in again.</p>
         </div>
 
         <div id="recaptcha-container" class="recaptcha-container"></div>

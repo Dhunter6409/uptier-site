@@ -31,6 +31,8 @@ if (!existsSync(previewIndexPath)) {
 }
 
 const authConfigPath = join(root, 'auth', 'config.js');
+const authAppPath = join(root, 'auth', 'app.js');
+const authIndexPath = join(root, 'auth', 'index.html');
 const productionBackendOrigin = 'https://uptier-plaid-backend-1076418370349.us-central1.run.app';
 if (!existsSync(authConfigPath)) {
   errors.push('Missing secure account portal configuration.');
@@ -38,6 +40,19 @@ if (!existsSync(authConfigPath)) {
   const authConfig = readFileSync(authConfigPath, 'utf8');
   if (!authConfig.includes(`'${productionBackendOrigin}'`)) {
     errors.push('Secure account portal must allow the deployed UpTier backend origin.');
+  }
+}
+
+if (!existsSync(authAppPath) || !existsSync(authIndexPath)) {
+  errors.push('Missing secure account portal completion flow.');
+} else {
+  const authApp = readFileSync(authAppPath, 'utf8');
+  const authIndex = readFileSync(authIndexPath, 'utf8');
+  if (!authApp.includes("document.body.classList.add('auth-flow-complete')")) {
+    errors.push('Secure account portal must lock the completed sign-in flow.');
+  }
+  if (!authIndex.includes('Return to the UpTier app now.')) {
+    errors.push('Secure account portal must clearly direct users back to UpTier.');
   }
 }
 
