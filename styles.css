@@ -52,6 +52,15 @@ h1 { max-width: 680px; margin-bottom: 24px; font-size: clamp(3.2rem, 6vw, 5.8rem
 .button:focus-visible, a:focus-visible { outline: 3px solid rgba(85, 232, 220, .45); outline-offset: 3px; }
 .button.primary { background: linear-gradient(105deg, var(--blue), var(--cyan)); color: #02131d; box-shadow: 0 12px 35px rgba(61, 203, 220, .18); }
 .button.secondary { border-color: var(--line); background: rgba(255, 255, 255, .035); color: var(--text); }
+.return-shell { min-height: calc(100vh - 82px); display: grid; place-items: center; padding: 64px 18px; }
+.return-card { width: min(100%, 680px); padding: clamp(28px, 6vw, 56px); border: 1px solid var(--line); border-radius: 26px; background: linear-gradient(145deg, rgba(15, 32, 53, .96), rgba(6, 17, 31, .98)); box-shadow: 0 28px 90px rgba(0, 0, 0, .32); }
+.return-card > img { display: block; margin: 4px 0 24px; filter: drop-shadow(0 0 24px rgba(90, 220, 255, .26)); }
+.return-card h1 { max-width: 14ch; margin: 0 0 18px; font-size: clamp(2.2rem, 8vw, 4.4rem); line-height: .98; letter-spacing: -.045em; }
+.return-card > p:not(.eyebrow, .notice) { color: var(--muted); font-size: 1.02rem; line-height: 1.75; }
+.return-card ol { display: grid; gap: 12px; margin: 28px 0; padding-left: 24px; color: #c5d3e1; }
+.return-card li { padding-left: 6px; }
+.return-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.return-card-success { border-color: rgba(85, 232, 220, .35); }
 .hero-note { max-width: 600px; color: #788a9d; font-size: .82rem; }
 
 .product-window { overflow: hidden; transform: perspective(1200px) rotateY(-2deg) rotateX(1deg); border: 1px solid rgba(125, 181, 222, .22); border-radius: 22px; background: rgba(5, 14, 26, .88); box-shadow: var(--shadow), 0 0 90px rgba(67, 93, 227, .12); }

@@ -31,6 +31,11 @@ if (!existsSync(previewIndexPath)) {
 }
 
 const authConfigPath = join(root, 'auth', 'config.js');
+const premiumReturnPaths = [
+  join(root, 'premium', 'index.html'),
+  join(root, 'premium', 'success', 'index.html'),
+  join(root, 'premium', 'cancel', 'index.html')
+];
 const productionBackendOrigin = 'https://uptier-plaid-backend-1076418370349.us-central1.run.app';
 if (!existsSync(authConfigPath)) {
   errors.push('Missing secure account portal configuration.');
@@ -38,6 +43,20 @@ if (!existsSync(authConfigPath)) {
   const authConfig = readFileSync(authConfigPath, 'utf8');
   if (!authConfig.includes(`'${productionBackendOrigin}'`)) {
     errors.push('Secure account portal must allow the deployed UpTier backend origin.');
+  }
+}
+
+for (const premiumReturnPath of premiumReturnPaths) {
+  if (!existsSync(premiumReturnPath)) {
+    errors.push(`Missing Stripe return page: ${premiumReturnPath}`);
+    continue;
+  }
+  const premiumReturn = readFileSync(premiumReturnPath, 'utf8');
+  if (!/name="robots"\s+content="noindex, nofollow"/i.test(premiumReturn)) {
+    errors.push(`${premiumReturnPath}: Stripe return pages must remain excluded from search indexing.`);
+  }
+  if (!premiumReturn.toLowerCase().includes('return to uptier')) {
+    errors.push(`${premiumReturnPath}: Stripe return page must direct the user back to UpTier.`);
   }
 }
 
