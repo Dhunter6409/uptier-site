@@ -1,40 +1,100 @@
 name: Product support
-description: Report a non-sensitive UpTier problem.
+description: Report a non-sensitive UpTier problem for automated triage.
 title: "[Support]: "
-labels: [support]
+labels: [support, client-report]
 body:
   - type: markdown
     attributes:
       value: |
-        Never attach statements, broker exports, account numbers, credentials, tokens, API keys, or screenshots containing private financial information.
+        UpTier automatically triages privacy-safe product reports. Never attach statements, broker exports, account numbers, balances, transactions, credentials, tokens, API keys, or screenshots containing private financial information.
+        Use uptier.support@gmail.com for privacy, security, account-access, or data-deletion matters.
   - type: input
     id: version
     attributes:
       label: UpTier version
-      placeholder: 0.25.2
-    validations:
-      required: true
-  - type: input
-    id: windows
-    attributes:
-      label: Windows version
+      description: Find this in Settings, then Application.
+      placeholder: 0.30.0
     validations:
       required: true
   - type: dropdown
-    id: build
+    id: platform
     attributes:
-      label: Build type
+      label: Platform
       options:
-        - Installed Windows app
-        - Microsoft Store test package
-        - Visual Studio/development build
+        - Windows desktop installer
+        - Windows Microsoft Store package
+        - iPhone or iPad through TestFlight
+        - iPhone or iPad App Store build
+        - Android test build
+        - Browser preview
+        - Visual Studio or development build
+    validations:
+      required: true
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating-system version
+      description: "Examples: Windows 11 24H2 or iOS 26.1."
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: UpTier area
+      options:
+        - Sign-in and account
+        - Dashboard
+        - Portfolio
+        - Dividends
+        - Banking
+        - Budget and debt
+        - Calendar
+        - Journey and financial freedom
+        - Activity
+        - Manage and profiles
+        - Settings
+        - Plaid connection or refresh
+        - Cross-device sync
+        - Billing and Premium
+        - Import or export
+        - Installation or update
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - Cosmetic or wording problem
+        - Feature is difficult to use
+        - Feature does not work
+        - App cannot open or continue
+        - Calculation or displayed value appears incorrect
     validations:
       required: true
   - type: textarea
     id: problem
     attributes:
       label: What happened?
-      description: Include the page, action, exact error, and safe steps to reproduce. Use invented sample data only.
+      description: Include the action, exact error, what you expected, and safe steps to reproduce. Use invented sample data only.
+    validations:
+      required: true
+  - type: input
+    id: reference
+    attributes:
+      label: Safe error or reference code
+      description: Optional. Enter only a short UpTier error/reference code, never an account, transaction, or provider identifier.
+      placeholder: UPT-REF-1234
+  - type: dropdown
+    id: restart
+    attributes:
+      label: Does it repeat after restarting UpTier?
+      options:
+        - Yes
+        - No
+        - I could not restart or reopen the app
     validations:
       required: true
   - type: checkboxes
@@ -42,5 +102,7 @@ body:
     attributes:
       label: Privacy check
       options:
-        - label: I confirm this report contains no sensitive financial information or credentials.
+        - label: I confirm this report contains no sensitive financial information, personal account data, credentials, or secrets.
+          required: true
+        - label: I understand corrections are reviewed and tested before release and are not deployed directly from this report.
           required: true

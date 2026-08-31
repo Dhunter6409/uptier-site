@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Private UpTier support
+    url: https://dhunter6409.github.io/uptier-site/support/#contact
+    about: Use the protected support channel for privacy, security, account-access, and deletion matters.
   - name: UpTier privacy policy
     url: https://dhunter6409.github.io/uptier-site/privacy/
     about: Review how UpTier handles local and optional connected-service data.
