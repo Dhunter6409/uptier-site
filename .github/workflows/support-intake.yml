@@ -1,0 +1,29 @@
+name: Acknowledge product support reports
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  acknowledge:
+    if: contains(github.event.issue.labels.*.name, 'support')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare triage labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create client-report --repo "${{ github.repository }}" --color 0E8A16 --description "Privacy-checked customer product report" --force
+          gh label create needs-triage --repo "${{ github.repository }}" --color FBCA04 --description "Awaiting automated or owner triage" --force
+          gh label create needs-privacy-review --repo "${{ github.repository }}" --color B60205 --description "Do not copy or process until privacy review" --force
+
+      - name: Queue report for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue edit "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --add-label client-report --add-label needs-triage
+          gh issue comment "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --body "Thank you. UpTier has queued this privacy-safe product report for triage. A correction will not be merged or released until it is reproduced, tested, and owner-approved. If the report accidentally contains account data, financial documents, credentials, tokens, or other sensitive information, edit it immediately and email uptier.support@gmail.com."

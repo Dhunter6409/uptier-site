@@ -85,7 +85,9 @@ function finishFlow({ title, message, note, status, requestState, tone = 'succes
   elements.email.value = '';
   elements.password.value = '';
   elements.phone.value = '';
+  elements.smsConsent.checked = false;
   elements.smsCode.value = '';
+  elements.codeHelp.textContent = '';
   elements.requestState.textContent = requestState;
   elements.requestState.dataset.tone = tone;
   elements.completeTitle.textContent = title;
@@ -189,6 +191,7 @@ async function finishBackendExchange(user, apiOrigin) {
     try {
       await deleteUser(user);
     } catch {
+      await signOut(auth).catch(() => undefined);
       finishFlow({
         title: 'Server data deleted',
         message: 'Do not reconnect this identity. Contact UpTier support to finish removing the remaining Google Identity record.',
