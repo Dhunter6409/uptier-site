@@ -1,5 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
 import {
+  EmailAuthProvider,
   PhoneAuthProvider,
   PhoneMultiFactorGenerator,
   RecaptchaVerifier,
@@ -9,18 +10,27 @@ import {
   inMemoryPersistence,
   initializeAuth,
   multiFactor,
+  reauthenticateWithCredential,
+  reload,
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
-import { accountCreationOutcome, accountModeForRequest, validateNewPassword } from './account-flow.mjs';
+import {
+  SETUP_MEMORY_TIMEOUT_MS,
+  accountCreationOutcome,
+  accountModeForRequest,
+  validateNewPassword,
+  verificationResendWaitSeconds
+} from './account-flow.mjs';
 import { allowedBackendOrigins, firebaseConfig } from './config.js';
 
 const elements = {
   status: document.querySelector('#status'),
   requestState: document.querySelector('#request-state'),
   accountForm: document.querySelector('#account-form'),
+  verificationPanel: document.querySelector('#verification-panel'),
   enrollForm: document.querySelector('#enroll-form'),
   codeForm: document.querySelector('#code-form'),
   completePanel: document.querySelector('#complete-panel'),
@@ -36,7 +46,10 @@ const elements = {
   createAccount: document.querySelector('#create-account'),
   switchAccountMode: document.querySelector('#switch-account-mode'),
   signInHelp: document.querySelector('#sign-in-help'),
+  verificationAddress: document.querySelector('#verification-address'),
+  checkVerification: document.querySelector('#check-verification'),
   resendVerification: document.querySelector('#resend-verification'),
+  useDifferentEmail: document.querySelector('#use-different-email'),
   resetPassword: document.querySelector('#reset-password'),
   sendEnrollmentCode: document.querySelector('#send-enrollment-code'),
   verifyCode: document.querySelector('#verify-code'),
@@ -48,7 +61,8 @@ const elements = {
   deleteWarning: document.querySelector('#delete-warning'),
   formTitle: document.querySelector('#form-title'),
   completeTitle: document.querySelector('#complete-title'),
-  completeMessage: document.querySelector('#complete-message')
+  completeMessage: document.querySelector('#complete-message'),
+  retryFinish: document.querySelector('#retry-finish')
 };
 
 const parameters = new URLSearchParams(window.location.search);
@@ -65,6 +79,15 @@ let recaptchaVerifier;
 let verificationId = '';
 let verificationMode = '';
 let signInResolver;
+let pendingIdentity;
+let pendingSetupPassword = '';
+let verificationEmailSentAt = 0;
+let resendCooldownTimer;
+let verificationRefreshInFlight = false;
+let busy = false;
+let pendingExchangeUser;
+let setupMemoryTimer;
+let setupGeneration = 0;
 
 function setStatus(message, tone = 'working') {
   elements.status.textContent = message;
@@ -72,13 +95,108 @@ function setStatus(message, tone = 'working') {
 }
 
 function showPanel(panel) {
-  for (const candidate of [elements.accountForm, elements.enrollForm, elements.codeForm, elements.completePanel]) {
+  for (const candidate of [elements.accountForm, elements.verificationPanel, elements.enrollForm, elements.codeForm, elements.completePanel]) {
     candidate.hidden = candidate !== panel;
   }
 }
 
-function setBusy(busy) {
-  for (const button of document.querySelectorAll('button')) button.disabled = busy;
+function updateVerificationResendButton() {
+  const waitSeconds = verificationResendWaitSeconds(verificationEmailSentAt);
+  elements.resendVerification.textContent = waitSeconds > 0
+    ? `Resend email in ${waitSeconds}s`
+    : 'Resend verification email';
+  elements.resendVerification.disabled = busy || waitSeconds > 0;
+  if (waitSeconds === 0 && resendCooldownTimer) {
+    window.clearInterval(resendCooldownTimer);
+    resendCooldownTimer = undefined;
+  }
+}
+
+function startVerificationResendCooldown() {
+  verificationEmailSentAt = Date.now();
+  if (resendCooldownTimer) window.clearInterval(resendCooldownTimer);
+  resendCooldownTimer = window.setInterval(updateVerificationResendButton, 1_000);
+  updateVerificationResendButton();
+}
+
+function setBusy(nextBusy) {
+  busy = nextBusy;
+  for (const button of document.querySelectorAll('button')) button.disabled = nextBusy;
+  updateVerificationResendButton();
+}
+
+function clearSensitiveSetupState({ clearIdentity = false } = {}) {
+  pendingSetupPassword = '';
+  elements.password.value = '';
+  elements.confirmPassword.value = '';
+  elements.smsCode.value = '';
+  verificationId = '';
+  verificationMode = '';
+  signInResolver = undefined;
+  if (clearIdentity) {
+    setupGeneration += 1;
+    pendingIdentity = undefined;
+    pendingExchangeUser = undefined;
+  }
+}
+
+async function expireSetupMemory() {
+  setupMemoryTimer = undefined;
+  const email = pendingIdentity?.email ?? '';
+  clearSensitiveSetupState({ clearIdentity: true });
+  try { if (auth.currentUser) await signOut(auth); } catch { /* Closing the page clears the memory-only session. */ }
+  configureAccountMode('sign-in', { preserveStatus: true });
+  showPanel(elements.accountForm);
+  elements.email.value = email;
+  setStatus('This secure setup window expired, so the temporary credential was cleared. Return to UpTier and start one fresh sign-in.', 'error');
+}
+
+function armSetupMemoryDeadline() {
+  if (setupMemoryTimer) window.clearTimeout(setupMemoryTimer);
+  setupMemoryTimer = window.setTimeout(expireSetupMemory, SETUP_MEMORY_TIMEOUT_MS);
+}
+
+function clearSetupMemoryDeadline() {
+  if (setupMemoryTimer) window.clearTimeout(setupMemoryTimer);
+  setupMemoryTimer = undefined;
+}
+
+function rememberPendingIdentity(user, password) {
+  setupGeneration += 1;
+  pendingIdentity = {
+    uid: user.uid,
+    email: (user.email ?? '').trim().toLowerCase(),
+    generation: setupGeneration
+  };
+  pendingSetupPassword = password;
+  return pendingIdentity;
+}
+
+function requirePendingIdentity(user, expectedIdentity = pendingIdentity) {
+  if (!expectedIdentity || expectedIdentity !== pendingIdentity || expectedIdentity.generation !== setupGeneration) {
+    throw new Error('This setup step was replaced. Continue only with the currently displayed secure account flow.');
+  }
+  const email = (user.email ?? '').trim().toLowerCase();
+  if (user.uid !== expectedIdentity.uid || email !== expectedIdentity.email) {
+    clearSensitiveSetupState({ clearIdentity: true });
+    void signOut(auth).catch(() => {});
+    throw new Error('The secure browser account changed during setup. Start a fresh secure sign-in from UpTier.');
+  }
+  return expectedIdentity;
+}
+
+function isCurrentSetupGeneration(expectedGeneration) {
+  return expectedGeneration === setupGeneration;
+}
+
+function isCurrentPendingIdentity(expectedIdentity) {
+  return Boolean(expectedIdentity
+    && expectedIdentity === pendingIdentity
+    && expectedIdentity.generation === setupGeneration);
+}
+
+function assertPendingIdentity(user) {
+  if (pendingIdentity) requirePendingIdentity(user, pendingIdentity);
 }
 
 function configureAccountMode(mode, options = {}) {
@@ -143,8 +261,8 @@ function cleanError(error) {
     'auth/internal-error': 'The secure identity service returned an unexpected error. Wait a moment and retry.',
     'auth/network-request-failed': 'The secure identity service could not be reached. Check your connection and retry.',
     'auth/quota-exceeded': 'The SMS security limit was reached. Wait and try again later.',
-    'auth/requires-recent-login': 'For security, sign out and sign in again before changing MFA.',
-    'auth/too-many-requests': 'Too many attempts were made. Wait and try again later.',
+    'auth/requires-recent-login': 'This secure setup window expired. Return to UpTier and start one fresh sign-in.',
+    'auth/too-many-requests': 'Too many attempts were made. Stop retrying for now. If a verification email was already sent, use that link—your account is still waiting safely.',
     'auth/unauthorized-domain': 'This UpTier sign-in address is not authorized. Contact UpTier support.',
     'auth/user-disabled': 'This account is disabled. Contact UpTier support.',
     'auth/weak-password': 'Use a stronger password with at least 12 characters.'
@@ -183,11 +301,14 @@ function normalizePhoneNumber(value) {
   return '';
 }
 
-async function sendMfaCode(options, mode, help) {
+async function sendMfaCode(options, mode, help, expectedGeneration = setupGeneration) {
+  if (!isCurrentSetupGeneration(expectedGeneration)) return false;
   resetRecaptcha();
   setStatus('Complete the visible reCAPTCHA check to send the security code.');
   const provider = new PhoneAuthProvider(auth);
-  verificationId = await provider.verifyPhoneNumber(options, recaptchaVerifier);
+  const nextVerificationId = await provider.verifyPhoneNumber(options, recaptchaVerifier);
+  if (!isCurrentSetupGeneration(expectedGeneration)) return false;
+  verificationId = nextVerificationId;
   verificationMode = mode;
   elements.codeTitle.textContent = mode === 'enroll' ? 'Confirm your mobile number' : 'Complete SMS verification';
   elements.codeHelp.textContent = help;
@@ -195,13 +316,160 @@ async function sendMfaCode(options, mode, help) {
   showPanel(elements.codeForm);
   setStatus('Security code sent. It may take a moment to arrive.', 'success');
   elements.smsCode.focus();
+  return true;
 }
 
-async function finishBackendExchange(user, apiOrigin) {
+function showVerificationStep(user, verificationEmailSent, expectedIdentity = pendingIdentity) {
+  requirePendingIdentity(user, expectedIdentity);
+  elements.verificationAddress.textContent = user.email ?? 'your email address';
+  showPanel(elements.verificationPanel);
+  if (verificationEmailSent) startVerificationResendCooldown();
+  else updateVerificationResendButton();
+  const outcome = accountCreationOutcome(verificationEmailSent);
+  setStatus(outcome.message, outcome.tone);
+  elements.checkVerification.focus();
+}
+
+function showEnrollmentStep(user, expectedIdentity = pendingIdentity) {
+  requirePendingIdentity(user, expectedIdentity);
+  showPanel(elements.enrollForm);
+  setStatus('Email verified. Add SMS security now—there is no need to sign in again.', 'success');
+  elements.phone.focus();
+}
+
+async function prepareMfaChallenge(error, help, expectedGeneration = setupGeneration) {
+  if (!isCurrentSetupGeneration(expectedGeneration)) return false;
+  signInResolver = getMultiFactorResolver(auth, error);
+  const phoneHint = signInResolver.hints.find((hint) => hint.factorId === PhoneMultiFactorGenerator.FACTOR_ID);
+  if (!phoneHint) throw new Error('This account has no supported SMS factor. Contact UpTier support.');
+  return sendMfaCode(
+    { multiFactorHint: phoneHint, session: signInResolver.session },
+    'sign-in',
+    help ?? `Enter the code sent to ${phoneHint.phoneNumber ?? 'your enrolled mobile number'}.`,
+    expectedGeneration
+  );
+}
+
+async function refreshEmailVerification({ announce = false } = {}) {
+  if (busy || verificationRefreshInFlight || elements.verificationPanel.hidden) return;
+  const user = auth.currentUser;
+  const expectedIdentity = pendingIdentity;
+  if (!user || !expectedIdentity) {
+    clearSensitiveSetupState({ clearIdentity: true });
+    configureAccountMode('sign-in', { preserveStatus: true });
+    showPanel(elements.accountForm);
+    setStatus('This browser setup session ended. Sign in once to continue with the account you already created.', 'error');
+    elements.email.focus();
+    return;
+  }
+  verificationRefreshInFlight = true;
+  try {
+    requirePendingIdentity(user, expectedIdentity);
+    await reload(user);
+    if (expectedIdentity !== pendingIdentity
+        || expectedIdentity.generation !== setupGeneration
+        || elements.verificationPanel.hidden
+        || auth.currentUser?.uid !== expectedIdentity.uid) return;
+    requirePendingIdentity(user, expectedIdentity);
+    if (!user.emailVerified) {
+      if (announce) setStatus('Email is not verified yet. Open the link in the email already sent, then return here—do not create the account or sign in again.', 'error');
+      return;
+    }
+    showEnrollmentStep(user, expectedIdentity);
+  } catch (error) {
+    setStatus(error instanceof Error && !error.code ? error.message : cleanError(error), 'error');
+  } finally {
+    verificationRefreshInFlight = false;
+  }
+}
+
+function showManualSignInRecovery(message) {
+  const email = pendingIdentity?.email ?? '';
+  pendingSetupPassword = '';
+  verificationId = '';
+  verificationMode = '';
+  signInResolver = undefined;
+  elements.smsCode.value = '';
+  configureAccountMode('sign-in', { preserveStatus: true });
+  showPanel(elements.accountForm);
+  elements.email.value = email;
+  elements.password.value = '';
+  setStatus(message, 'error');
+  elements.password.focus();
+}
+
+function showBackendRetry(error) {
+  elements.completeTitle.textContent = 'Your identity is verified';
+  elements.completeMessage.textContent = 'The secure handoff to UpTier did not finish. Keep this page open and retry the handoff—do not sign in again.';
+  elements.retryFinish.hidden = false;
+  showPanel(elements.completePanel);
+  setStatus(error instanceof Error && !error.code ? error.message : cleanError(error), 'error');
+  elements.retryFinish.focus();
+}
+
+async function beginAutomaticMfaSignIn(expectedIdentity = pendingIdentity) {
+  const currentUser = auth.currentUser;
+  const expectedGeneration = setupGeneration;
+  if (!currentUser || !expectedIdentity || !pendingSetupPassword) {
+    showManualSignInRecovery('SMS security is active. This browser no longer has the temporary setup credential, so sign in once to finish.');
+    return;
+  }
+  requirePendingIdentity(currentUser, expectedIdentity);
+  const { email } = expectedIdentity;
+  const password = pendingSetupPassword;
+  pendingSetupPassword = '';
+  try {
+    await signOut(auth);
+  } catch (error) {
+    if (isCurrentPendingIdentity(expectedIdentity)) {
+      showManualSignInRecovery(`${cleanError(error)} SMS security is active; sign in once to finish.`);
+    }
+    return;
+  }
+  if (!isCurrentPendingIdentity(expectedIdentity) || !isCurrentSetupGeneration(expectedGeneration)) return;
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+    if (!isCurrentPendingIdentity(expectedIdentity) || !isCurrentSetupGeneration(expectedGeneration)) {
+      try { if (auth.currentUser) await signOut(auth); } catch { /* Expiry remains terminal. */ }
+      return;
+    }
+    await signOut(auth);
+    if (!isCurrentPendingIdentity(expectedIdentity) || !isCurrentSetupGeneration(expectedGeneration)) return;
+    showManualSignInRecovery('SMS security is active, but the final challenge did not start. Wait a moment, then sign in once to finish. UpTier will not continue without the SMS check.');
+    return;
+  } catch (error) {
+    if (!isCurrentPendingIdentity(expectedIdentity) || !isCurrentSetupGeneration(expectedGeneration)) {
+      try { if (auth.currentUser) await signOut(auth); } catch { /* Expiry remains terminal. */ }
+      return;
+    }
+    if (error?.code !== 'auth/multi-factor-auth-required') {
+      showManualSignInRecovery(`${error instanceof Error && !error.code ? error.message : cleanError(error)} When the temporary limit clears, sign in once to finish.`);
+      return;
+    }
+    try {
+      await prepareMfaChallenge(
+        error,
+        'Enter this final code to confirm the SMS factor for your UpTier session. You do not need to enter your email or password again.',
+        expectedGeneration
+      );
+    } catch (challengeError) {
+      if (!isCurrentPendingIdentity(expectedIdentity) || !isCurrentSetupGeneration(expectedGeneration)) return;
+      showManualSignInRecovery(`${challengeError instanceof Error && !challengeError.code ? challengeError.message : cleanError(challengeError)} SMS security is active; sign in once when you are ready to finish.`);
+    }
+  }
+}
+
+async function finishBackendExchange(user, apiOrigin, expectedGeneration = setupGeneration, expectedIdentity = pendingIdentity) {
+  if (!isCurrentSetupGeneration(expectedGeneration)) return false;
   if (!user.emailVerified || multiFactor(user).enrolledFactors.length === 0) throw new Error('Verified email and SMS MFA are required.');
+  if (expectedIdentity) requirePendingIdentity(user, expectedIdentity);
+  const tokenResult = await user.getIdTokenResult(true);
+  if (!isCurrentSetupGeneration(expectedGeneration)
+      || (expectedIdentity && !isCurrentPendingIdentity(expectedIdentity))) return false;
+  if (tokenResult.signInSecondFactor !== 'phone') throw new Error('Complete the SMS second-factor challenge before connecting this account to UpTier.');
   if (deletionMode) {
     setStatus('Identity verified. Removing UpTier server data and connected Plaid Items…');
-    const idToken = await user.getIdToken(true);
+    const idToken = tokenResult.token;
     const response = await fetch(`${apiOrigin}/v1/auth/browser/delete/complete`, {
       method: 'POST',
       mode: 'cors',
@@ -211,6 +479,8 @@ async function finishBackendExchange(user, apiOrigin) {
       body: JSON.stringify({ requestToken, idToken })
     });
     const payload = await response.json().catch(() => ({}));
+    if (!isCurrentSetupGeneration(expectedGeneration)
+        || (expectedIdentity && !isCurrentPendingIdentity(expectedIdentity))) return false;
     if (!response.ok) throw new Error(typeof payload.message === 'string' ? payload.message : 'UpTier could not delete this account.');
     try {
       await deleteUser(user);
@@ -228,11 +498,14 @@ async function finishBackendExchange(user, apiOrigin) {
     setStatus('The UpTier cloud account, connected Plaid Items, server data, sessions, and Google Identity record were deleted.', 'success');
     elements.completeTitle.textContent = 'Account deletion complete';
     elements.completeMessage.textContent = 'Return to UpTier. The desktop app will clear its protected session automatically. Local imported records remain until you delete them locally.';
+    clearSetupMemoryDeadline();
+    clearSensitiveSetupState({ clearIdentity: true });
     showPanel(elements.completePanel);
-    return;
+    return true;
   }
+  pendingExchangeUser = user;
   setStatus('SMS verified. Creating a protected UpTier session…');
-  const idToken = await user.getIdToken(true);
+  const idToken = tokenResult.token;
   const response = await fetch(`${apiOrigin}/v1/auth/browser/complete`, {
     method: 'POST',
     mode: 'cors',
@@ -242,42 +515,57 @@ async function finishBackendExchange(user, apiOrigin) {
     body: JSON.stringify({ requestToken, idToken })
   });
   const payload = await response.json().catch(() => ({}));
+  if (!isCurrentSetupGeneration(expectedGeneration)
+      || (expectedIdentity && !isCurrentPendingIdentity(expectedIdentity))) return false;
   if (!response.ok) throw new Error(typeof payload.message === 'string' ? payload.message : 'UpTier could not complete this sign-in.');
   await signOut(auth);
+  if (!isCurrentSetupGeneration(expectedGeneration)
+      || (expectedIdentity && !isCurrentPendingIdentity(expectedIdentity))) return false;
+  pendingExchangeUser = undefined;
+  clearSetupMemoryDeadline();
+  clearSensitiveSetupState({ clearIdentity: true });
   elements.requestState.textContent = 'Verified';
   elements.requestState.dataset.tone = 'success';
+  elements.completeTitle.textContent = 'Secure sign-in complete';
+  elements.completeMessage.textContent = 'Return to UpTier. The app will finish automatically.';
+  elements.retryFinish.hidden = true;
   setStatus('Identity verified and exchanged. No Google session remains on this page.', 'success');
   showPanel(elements.completePanel);
+  return true;
 }
 
 async function handlePrimarySignIn(apiOrigin) {
   const email = elements.email.value.trim().toLowerCase();
   const password = elements.password.value;
+  const operationGeneration = setupGeneration;
   try {
     const result = await signInWithEmailAndPassword(auth, email, password);
-    if (!result.user.emailVerified) {
-      await sendEmailVerification(result.user);
+    if (operationGeneration !== setupGeneration) {
       await signOut(auth);
-      elements.password.value = '';
-      throw new Error('Verify the email we just sent, then sign in again below. If this request expires, return to UpTier and start Sign In again.');
-    }
-    if (multiFactor(result.user).enrolledFactors.length === 0) {
-      showPanel(elements.enrollForm);
-      setStatus('Email verified. Add SMS multi-factor authentication to continue.', 'success');
-      elements.phone.focus();
       return;
     }
-    throw new Error('SMS verification is required. Sign in again to receive a security code.');
+    if (!result.user.emailVerified) {
+      const expectedIdentity = rememberPendingIdentity(result.user, password);
+      elements.password.value = '';
+      resetPasswordVisibility();
+      showVerificationStep(result.user, false, expectedIdentity);
+      setStatus('This account is already created and is waiting for email verification. Use the email already sent, or choose Resend once—do not keep signing in.', 'success');
+      return;
+    }
+    if (multiFactor(result.user).enrolledFactors.length === 0) {
+      const expectedIdentity = rememberPendingIdentity(result.user, password);
+      elements.password.value = '';
+      resetPasswordVisibility();
+      showEnrollmentStep(result.user, expectedIdentity);
+      return;
+    }
+    await signOut(auth);
+    throw new Error('SMS verification did not start. Return to UpTier and open one fresh secure sign-in request.');
   } catch (error) {
+    if (operationGeneration !== setupGeneration) return;
     if (error?.code !== 'auth/multi-factor-auth-required') throw error;
-    signInResolver = getMultiFactorResolver(auth, error);
-    const phoneHint = signInResolver.hints.find((hint) => hint.factorId === PhoneMultiFactorGenerator.FACTOR_ID);
-    if (!phoneHint) throw new Error('This account has no supported SMS factor. Contact UpTier support.');
-    await sendMfaCode(
-      { multiFactorHint: phoneHint, session: signInResolver.session },
-      'sign-in',
-      `Enter the code sent to ${phoneHint.phoneNumber ?? 'your enrolled mobile number'}.`
-    );
+    pendingSetupPassword = '';
+    await prepareMfaChallenge(error, undefined, operationGeneration);
   }
 }
 
@@ -290,30 +578,28 @@ async function handleAccountCreation() {
     (validationMessage === 'Passwords do not match.' ? elements.confirmPassword : elements.password).focus();
     return;
   }
+  const operationGeneration = setupGeneration;
   setStatus('Creating your secure UpTier identity…');
   const result = await createUserWithEmailAndPassword(auth, email, password);
+  if (operationGeneration !== setupGeneration) {
+    await signOut(auth);
+    return;
+  }
+  const expectedIdentity = rememberPendingIdentity(result.user, password);
   let verificationEmailSent = false;
+  let verificationEmailError;
   try {
     await sendEmailVerification(result.user);
     verificationEmailSent = true;
-  } catch {
-    // The identity already exists. Continue to a recovery state instead of
-    // inviting the user to retry account creation and receive an email-in-use error.
+  } catch (error) {
+    verificationEmailError = error;
   }
-  let signedOut = false;
-  try {
-    await signOut(auth);
-    signedOut = true;
-  } catch {
-    // Auth uses memory-only persistence, so closing the page also clears this
-    // session. The recovery message below makes that fallback explicit.
-  }
+  if (expectedIdentity !== pendingIdentity || expectedIdentity.generation !== setupGeneration) return;
   elements.password.value = '';
   elements.confirmPassword.value = '';
   resetPasswordVisibility();
-  configureAccountMode('sign-in', { preserveStatus: true });
-  const outcome = accountCreationOutcome(verificationEmailSent, signedOut);
-  setStatus(outcome.message, outcome.tone);
+  if (verificationEmailError?.code === 'auth/too-many-requests') startVerificationResendCooldown();
+  showVerificationStep(result.user, verificationEmailSent, expectedIdentity);
 }
 
 let apiOrigin = '';
@@ -321,6 +607,7 @@ try {
   apiOrigin = validateLaunchRequest();
   const firebaseApp = initializeApp(firebaseConfig);
   auth = initializeAuth(firebaseApp, { persistence: inMemoryPersistence });
+  armSetupMemoryDeadline();
   if (deletionMode) {
     document.title = 'Delete cloud account | UpTier';
     elements.introEyebrow.textContent = 'VERIFIED ACCOUNT DELETION';
@@ -357,9 +644,10 @@ elements.accountForm.addEventListener('submit', async (event) => {
   finally { setBusy(false); }
 });
 
-elements.switchAccountMode.addEventListener('click', () => {
+elements.switchAccountMode.addEventListener('click', async () => {
+  try { if (auth.currentUser) await signOut(auth); } catch { /* Memory-only session still clears when this page closes. */ }
+  clearSensitiveSetupState({ clearIdentity: true });
   configureAccountMode(accountMode === 'create-account' ? 'sign-in' : 'create-account');
-  elements.password.value = '';
   resetPasswordVisibility();
   elements.password.focus();
 });
@@ -377,26 +665,58 @@ for (const button of document.querySelectorAll('[data-password-toggle]')) {
   });
 }
 
+elements.checkVerification.addEventListener('click', () => void refreshEmailVerification({ announce: true }));
+
+window.addEventListener('focus', () => void refreshEmailVerification());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') void refreshEmailVerification();
+});
+
 elements.resendVerification.addEventListener('click', async () => {
-  const email = elements.email.value.trim().toLowerCase();
-  const password = elements.password.value;
-  if (!email || !password) return setStatus('Enter your email address and password before requesting another verification email.', 'error');
+  if (verificationResendWaitSeconds(verificationEmailSentAt) > 0) return;
+  const user = auth.currentUser;
+  const expectedIdentity = pendingIdentity;
+  if (!user || !expectedIdentity) {
+    showManualSignInRecovery('This browser setup session ended. Sign in once to continue with the account you already created.');
+    return;
+  }
   setBusy(true);
-  setStatus('Checking the account and preparing a new verification email…');
+  setStatus('Preparing one new verification email…');
   try {
-    const result = await signInWithEmailAndPassword(auth, email, password);
-    if (result.user.emailVerified) {
-      await signOut(auth);
-      elements.password.value = '';
-      setStatus('This email is already verified. Start a fresh secure sign-in from UpTier to continue.', 'success');
+    requirePendingIdentity(user, expectedIdentity);
+    await reload(user);
+    if (!isCurrentPendingIdentity(expectedIdentity)
+        || elements.verificationPanel.hidden
+        || auth.currentUser?.uid !== expectedIdentity.uid) return;
+    requirePendingIdentity(user, expectedIdentity);
+    if (user.emailVerified) {
+      showEnrollmentStep(user, expectedIdentity);
       return;
     }
-    await sendEmailVerification(result.user);
-    await signOut(auth);
-    elements.password.value = '';
-    setStatus('A new verification email was sent. Use only the newest message, then start a fresh secure sign-in from UpTier.', 'success');
-  } catch (error) { setStatus(cleanError(error), 'error'); }
+    await sendEmailVerification(user);
+    if (!isCurrentPendingIdentity(expectedIdentity)
+        || elements.verificationPanel.hidden
+        || auth.currentUser?.uid !== expectedIdentity.uid) return;
+    startVerificationResendCooldown();
+    setStatus('Verification email sent. Open the link, then return to this page. Do not sign in or create the account again.', 'success');
+  } catch (error) {
+    if (error?.code === 'auth/too-many-requests') startVerificationResendCooldown();
+    setStatus(cleanError(error), 'error');
+  }
   finally { setBusy(false); }
+});
+
+elements.useDifferentEmail.addEventListener('click', async () => {
+  setBusy(true);
+  try { if (auth.currentUser) await signOut(auth); } catch { /* Closing the page clears the memory-only session. */ }
+  clearSensitiveSetupState({ clearIdentity: true });
+  verificationEmailSentAt = 0;
+  configureAccountMode(accountMode, { preserveStatus: true });
+  showPanel(elements.accountForm);
+  elements.email.value = '';
+  setStatus('Enter the different email you want to use.', 'working');
+  setBusy(false);
+  elements.email.focus();
 });
 
 elements.resetPassword.addEventListener('click', async () => {
@@ -410,20 +730,56 @@ elements.resetPassword.addEventListener('click', async () => {
   finally { setBusy(false); }
 });
 
+elements.retryFinish.addEventListener('click', async () => {
+  if (!pendingExchangeUser) {
+    showManualSignInRecovery('This verified handoff expired. Return to UpTier and start one fresh secure sign-in.');
+    return;
+  }
+  setBusy(true);
+  elements.retryFinish.hidden = true;
+  const expectedGeneration = setupGeneration;
+  const expectedIdentity = pendingIdentity;
+  try {
+    await finishBackendExchange(pendingExchangeUser, apiOrigin, expectedGeneration, expectedIdentity);
+  } catch (error) {
+    if (isCurrentSetupGeneration(expectedGeneration)
+        && (!expectedIdentity || isCurrentPendingIdentity(expectedIdentity))) showBackendRetry(error);
+  } finally {
+    setBusy(false);
+  }
+});
+
 elements.enrollForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!elements.smsConsent.checked) return setStatus('Consent is required before sending a security text.', 'error');
   const user = auth.currentUser;
+  const expectedIdentity = pendingIdentity;
   if (!user?.emailVerified) return setStatus('Sign in with a verified email before adding SMS MFA.', 'error');
+  if (!expectedIdentity) return showManualSignInRecovery('This browser setup session ended. Sign in once to continue with the account you already created.');
   const phoneNumber = normalizePhoneNumber(elements.phone.value);
   if (!phoneNumber) return setStatus('Enter a valid mobile number with country code, such as +1 555 555 0123.', 'error');
   elements.phone.value = phoneNumber;
   setBusy(true);
   setStatus('Preparing the SMS security check…');
   try {
+    requirePendingIdentity(user, expectedIdentity);
+    if (pendingSetupPassword) {
+      const credential = EmailAuthProvider.credential(expectedIdentity.email, pendingSetupPassword);
+      const reauthenticated = await reauthenticateWithCredential(user, credential);
+      if (!isCurrentPendingIdentity(expectedIdentity)) return;
+      requirePendingIdentity(reauthenticated.user, expectedIdentity);
+    }
     const session = await multiFactor(user).getSession();
-    await sendMfaCode({ phoneNumber, session }, 'enroll', 'Enter the code sent to the mobile number you provided.');
-  } catch (error) { setStatus(cleanError(error), 'error'); }
+    if (!isCurrentPendingIdentity(expectedIdentity)) return;
+    await sendMfaCode(
+      { phoneNumber, session },
+      'enroll',
+      'Enter the code sent to the mobile number you provided.',
+      expectedIdentity.generation
+    );
+  } catch (error) {
+    if (isCurrentPendingIdentity(expectedIdentity)) setStatus(cleanError(error), 'error');
+  }
   finally { setBusy(false); }
 });
 
@@ -432,23 +788,60 @@ elements.codeForm.addEventListener('submit', async (event) => {
   if (!/^\d{6}$/.test(elements.smsCode.value)) return setStatus('Enter the six-digit security code.', 'error');
   setBusy(true);
   setStatus('Verifying the security code…');
+  const operationGeneration = setupGeneration;
+  const expectedIdentity = pendingIdentity;
+  let enrollmentCommitted = false;
   try {
     const credential = PhoneAuthProvider.credential(verificationId, elements.smsCode.value);
     const assertion = PhoneMultiFactorGenerator.assertion(credential);
     if (verificationMode === 'enroll') {
       const user = auth.currentUser;
       if (!user) throw new Error('Your setup session expired. Sign in again.');
+      requirePendingIdentity(user, expectedIdentity);
       await multiFactor(user).enroll(assertion, 'UpTier mobile');
-      await signOut(auth);
-      showPanel(elements.accountForm);
-      elements.password.value = '';
-      setStatus('SMS MFA is active. Sign in once more to verify both factors and return to UpTier.', 'success');
+      enrollmentCommitted = true;
+      verificationMode = 'enrolled';
+      verificationId = '';
+      elements.smsCode.value = '';
+      if (!isCurrentPendingIdentity(expectedIdentity)
+          || !isCurrentSetupGeneration(operationGeneration)) {
+        try { if (auth.currentUser) await signOut(auth); } catch { /* Expiry remains terminal. */ }
+        return;
+      }
+      let tokenResult;
+      try {
+        tokenResult = await user.getIdTokenResult(true);
+      } catch {
+        if (!isCurrentPendingIdentity(expectedIdentity)
+            || !isCurrentSetupGeneration(operationGeneration)) return;
+        setStatus('SMS security is active. Finishing setup without asking for your password again…', 'success');
+        await beginAutomaticMfaSignIn(expectedIdentity);
+        return;
+      }
+      if (!isCurrentPendingIdentity(expectedIdentity)
+          || !isCurrentSetupGeneration(operationGeneration)) return;
+      if (tokenResult.signInSecondFactor === 'phone') {
+        await finishBackendExchange(user, apiOrigin, operationGeneration, expectedIdentity);
+        return;
+      }
+      setStatus('SMS security is active. Finishing setup without asking for your password again…', 'success');
+      await beginAutomaticMfaSignIn(expectedIdentity);
       return;
     }
     if (!signInResolver) throw new Error('Your sign-in session expired. Start again from UpTier.');
     const result = await signInResolver.resolveSignIn(assertion);
-    await finishBackendExchange(result.user, apiOrigin);
+    if (!isCurrentSetupGeneration(operationGeneration)) {
+      try { if (auth.currentUser) await signOut(auth); } catch { /* Expiry remains terminal. */ }
+      return;
+    }
+    assertPendingIdentity(result.user);
+    await finishBackendExchange(result.user, apiOrigin, operationGeneration, expectedIdentity);
   } catch (error) {
-    setStatus(error instanceof Error && !error.code ? error.message : cleanError(error), 'error');
+    if (!isCurrentSetupGeneration(operationGeneration)
+        || (expectedIdentity && !isCurrentPendingIdentity(expectedIdentity))) return;
+    if (pendingExchangeUser && !deletionMode) showBackendRetry(error);
+    else if (enrollmentCommitted) {
+      showManualSignInRecovery('SMS security is active. The automatic handoff did not finish, so sign in once to complete setup. Do not try to enroll the phone again.');
+    } else setStatus(error instanceof Error && !error.code ? error.message : cleanError(error), 'error');
   } finally { setBusy(false); }
 });

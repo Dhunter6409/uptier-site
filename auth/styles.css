@@ -35,6 +35,18 @@
 .auth-recovery-actions { display: grid; gap: 10px; margin-top: 4px; padding: 16px; border: 1px solid rgba(110, 168, 255, .2); border-radius: 12px; background: rgba(110, 168, 255, .055); }
 .auth-recovery-actions > strong { color: #dceaff; font-size: .79rem; }
 .auth-recovery-actions .auth-button { width: 100%; }
+.auth-progress { margin: 0 0 2px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; list-style: none; counter-reset: auth-step; }
+.auth-progress li { min-width: 0; padding-top: 22px; position: relative; color: #71859a; font-size: .65rem; font-weight: 800; text-align: center; }
+.auth-progress li::before { counter-increment: auth-step; content: counter(auth-step); position: absolute; top: 0; left: 50%; width: 18px; height: 18px; display: grid; place-items: center; transform: translateX(-50%); border: 1px solid var(--line-strong); border-radius: 50%; color: #91a5b9; background: #07111f; font-size: .62rem; }
+.auth-progress li::after { content: ""; position: absolute; top: 9px; right: 50%; width: calc(100% - 18px); height: 1px; transform: translateX(-9px); background: var(--line); }
+.auth-progress li:first-child::after { display: none; }
+.auth-progress li.complete, .auth-progress li[aria-current="step"] { color: #d8fdf9; }
+.auth-progress li.complete::before { content: "✓"; border-color: rgba(85, 232, 220, .45); color: var(--cyan); background: rgba(85, 232, 220, .08); }
+.auth-progress li[aria-current="step"]::before { border-color: var(--cyan); color: #02131d; background: var(--cyan); box-shadow: 0 0 18px rgba(85, 232, 220, .26); }
+.auth-verification-callout b { color: #d8fdf9; overflow-wrap: anywhere; }
+.auth-step-guidance, .auth-step-warning { margin: 0; color: #9bafc2; font-size: .82rem; line-height: 1.55; }
+.auth-step-warning { padding: 13px 14px; border: 1px solid rgba(255, 196, 92, .28); border-radius: 11px; color: #e5c98f; background: rgba(255, 196, 92, .06); }
+.auth-step-warning strong { color: #ffe4aa; }
 .auth-page[data-account-mode="create-account"] .auth-card { border-color: rgba(85, 232, 220, .4); box-shadow: 0 24px 70px rgba(0, 0, 0, .3), 0 0 45px rgba(85, 232, 220, .08); }
 .auth-page[data-account-mode="create-account"] .auth-security-label { border-color: rgba(85, 232, 220, .38); background: rgba(85, 232, 220, .1); }
 .auth-callout { display: grid; gap: 3px; padding: 16px; border-left: 3px solid var(--cyan); border-radius: 0 11px 11px 0; background: rgba(85, 232, 220, .055); }.auth-callout span { color: #99acbf; font-size: .8rem; }
@@ -42,5 +54,6 @@
 .recaptcha-container { min-height: 0; margin-top: 18px; overflow: hidden; }
 .auth-legal { margin: 25px 0 0; overflow-wrap: anywhere; color: #71859a; font-size: .72rem; }.auth-legal a { color: #a9bdcf; }
 .auth-complete { padding-block: 40px; text-align: center; }.complete-mark { width: 62px; height: 62px; margin: 0 auto 20px; display: grid; place-items: center; border: 1px solid rgba(85,232,220,.5); border-radius: 50%; color: var(--cyan); background: rgba(85,232,220,.08); box-shadow: 0 0 35px rgba(85,232,220,.16); font-size: 1.8rem; }.auth-complete h2 { margin-bottom: 9px; }.auth-complete p { color: var(--muted); }
+.auth-complete .auth-button { width: 100%; margin-top: 18px; }
 @media (max-width: 880px) { .auth-shell { grid-template-columns: 1fr; gap: 46px; padding-block: 52px; }.auth-intro h1 { max-width: 720px; }.auth-card { min-height: 0; } }
 @media (max-width: 560px) { .auth-header, .auth-shell { width: min(100% - 28px, 1120px); }.auth-security-label { display: none; }.auth-shell { padding-block: 38px; }.auth-intro h1 { font-size: 2.65rem; }.auth-card { padding: 22px; }.auth-card-heading { display: grid; }.auth-actions { grid-template-columns: 1fr; } }

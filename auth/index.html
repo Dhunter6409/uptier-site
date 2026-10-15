@@ -68,11 +68,34 @@
           <div id="sign-in-help" class="auth-recovery-actions">
             <strong>Can’t sign in?</strong>
             <button id="reset-password" class="auth-button secondary" type="button">Reset password by email</button>
-            <button id="resend-verification" class="auth-text-button" type="button">Resend verification email</button>
           </div>
         </form>
 
+        <section id="verification-panel" class="auth-form" aria-labelledby="verification-title" hidden>
+          <ol class="auth-progress" aria-label="Account setup progress">
+            <li class="complete">Account</li>
+            <li aria-current="step">Verify email</li>
+            <li>SMS security</li>
+            <li>Done</li>
+          </ol>
+          <div class="auth-callout auth-verification-callout">
+            <strong id="verification-title">Check your email</strong>
+            <span>We sent a verification link to <b id="verification-address"></b>.</span>
+          </div>
+          <p class="auth-step-guidance">Open the link in your inbox, then return to this same secure page. Check spam or junk if it is not in your inbox.</p>
+          <p class="auth-step-warning"><strong>Do not create the account or sign in again.</strong> Your account is already waiting here, and repeated attempts can temporarily lock sign-in.</p>
+          <button id="check-verification" class="auth-button primary" type="button">I Verified My Email — Continue</button>
+          <button id="resend-verification" class="auth-button secondary" type="button">Resend verification email</button>
+          <button id="use-different-email" class="auth-text-button" type="button">Use a different email</button>
+        </section>
+
         <form id="enroll-form" class="auth-form" hidden>
+          <ol class="auth-progress" aria-label="Account setup progress">
+            <li class="complete">Account</li>
+            <li class="complete">Verify email</li>
+            <li aria-current="step">SMS security</li>
+            <li>Done</li>
+          </ol>
           <div class="auth-callout"><strong>Protect this account</strong><span>Your email is verified. Add an SMS second factor to continue.</span></div>
           <label>Mobile number<input id="phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" placeholder="+1 555 555 0123" maxlength="24" required /></label>
           <label class="auth-consent"><input id="sms-consent" type="checkbox" required /><span>I agree to receive a one-time security text. Standard message and data rates may apply.</span></label>
@@ -80,6 +103,12 @@
         </form>
 
         <form id="code-form" class="auth-form" hidden>
+          <ol class="auth-progress" aria-label="Account setup progress">
+            <li class="complete">Account</li>
+            <li class="complete">Verify email</li>
+            <li aria-current="step">SMS security</li>
+            <li>Done</li>
+          </ol>
           <div class="auth-callout"><strong id="code-title">Enter security code</strong><span id="code-help">Enter the six-digit code sent to your phone.</span></div>
           <label>Six-digit code<input id="sms-code" name="sms-code" type="text" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required /></label>
           <button id="verify-code" class="auth-button primary" type="submit">Verify code</button>
@@ -89,6 +118,7 @@
           <div class="complete-mark" aria-hidden="true">✓</div>
           <h2 id="complete-title">Secure sign-in complete</h2>
           <p id="complete-message">Return to UpTier. The desktop app will finish automatically.</p>
+          <button id="retry-finish" class="auth-button secondary" type="button" hidden>Retry Finish Setup</button>
         </div>
 
         <div id="recaptcha-container" class="recaptcha-container"></div>
