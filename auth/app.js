@@ -14,6 +14,7 @@ import {
   signInWithEmailAndPassword,
   signOut
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
+import { accountCreationOutcome, accountModeForRequest, validateNewPassword } from './account-flow.mjs';
 import { allowedBackendOrigins, firebaseConfig } from './config.js';
 
 const elements = {
@@ -25,11 +26,16 @@ const elements = {
   completePanel: document.querySelector('#complete-panel'),
   email: document.querySelector('#email'),
   password: document.querySelector('#password'),
+  confirmPassword: document.querySelector('#confirm-password'),
+  confirmPasswordField: document.querySelector('#confirm-password-field'),
+  passwordGuidance: document.querySelector('#password-guidance'),
   phone: document.querySelector('#phone'),
   smsConsent: document.querySelector('#sms-consent'),
   smsCode: document.querySelector('#sms-code'),
   signIn: document.querySelector('#sign-in'),
   createAccount: document.querySelector('#create-account'),
+  switchAccountMode: document.querySelector('#switch-account-mode'),
+  signInHelp: document.querySelector('#sign-in-help'),
   resendVerification: document.querySelector('#resend-verification'),
   resetPassword: document.querySelector('#reset-password'),
   sendEnrollmentCode: document.querySelector('#send-enrollment-code'),
@@ -49,7 +55,9 @@ const parameters = new URLSearchParams(window.location.search);
 const requestToken = parameters.get('request') ?? '';
 const apiParameter = parameters.get('api') ?? '';
 const actionParameter = parameters.get('action') ?? 'sign-in';
+const modeParameter = parameters.get('mode') ?? 'sign-in';
 const deletionMode = actionParameter === 'delete-account';
+let accountMode = accountModeForRequest(modeParameter, deletionMode);
 window.history.replaceState({}, document.title, window.location.pathname);
 
 let auth;
@@ -71,6 +79,48 @@ function showPanel(panel) {
 
 function setBusy(busy) {
   for (const button of document.querySelectorAll('button')) button.disabled = busy;
+}
+
+function configureAccountMode(mode, options = {}) {
+  if (deletionMode) return;
+  accountMode = mode === 'create-account' ? 'create-account' : 'sign-in';
+  const creating = accountMode === 'create-account';
+  document.body.dataset.accountMode = accountMode;
+  document.title = creating ? 'Create secure account | UpTier' : 'Secure account sign-in | UpTier';
+  elements.introEyebrow.textContent = creating ? 'CREATE YOUR UPTIER ACCOUNT' : 'SECURE CONNECTED PORTFOLIO';
+  elements.introTitle.textContent = creating
+    ? 'Create one secure account for your protected UpTier profile.'
+    : 'Sign in without sharing credentials with the desktop app.';
+  elements.introLead.textContent = creating
+    ? 'Choose your email and a unique password here in the secure browser. After email verification, UpTier adds SMS protection before connecting the account to the app.'
+    : 'Google Identity verifies your email and second factor in this browser. UpTier receives only a short-lived identity proof and exchanges it for its own protected session.';
+  elements.formTitle.textContent = creating ? 'Create your account' : 'Sign in to UpTier';
+  elements.password.autocomplete = creating ? 'new-password' : 'current-password';
+  elements.password.minLength = creating ? 12 : 0;
+  elements.confirmPasswordField.hidden = !creating;
+  elements.confirmPassword.required = creating;
+  elements.confirmPassword.value = '';
+  elements.passwordGuidance.hidden = !creating;
+  elements.signIn.hidden = creating;
+  elements.createAccount.hidden = !creating;
+  elements.signInHelp.hidden = creating;
+  elements.switchAccountMode.textContent = creating ? 'Already have an account? Sign in instead' : 'New to UpTier? Create an account';
+  if (!options.preserveStatus) {
+    setStatus(creating
+      ? 'Enter your email and create a unique password with 12 to 128 characters.'
+      : 'Use your UpTier account email and password to continue.');
+  }
+}
+
+function resetPasswordVisibility() {
+  for (const button of document.querySelectorAll('[data-password-toggle]')) {
+    const input = document.querySelector(`#${button.dataset.passwordToggle}`);
+    if (!(input instanceof HTMLInputElement)) continue;
+    input.type = 'password';
+    button.textContent = 'Show';
+    button.setAttribute('aria-pressed', 'false');
+    button.setAttribute('aria-label', input === elements.confirmPassword ? 'Show confirmed password' : 'Show password');
+  }
 }
 
 function cleanError(error) {
@@ -110,6 +160,7 @@ function validateLaunchRequest() {
   if (!firebaseConfig.apiKey || !firebaseConfig.appId) throw new Error('UpTier secure sign-in is awaiting final Google configuration.');
   if (!/^uptier_browser_auth_[A-Za-z0-9_-]{43}$/.test(requestToken)) throw new Error('This sign-in request is invalid or expired. Start again from UpTier.');
   if (actionParameter !== 'sign-in' && actionParameter !== 'delete-account') throw new Error('This secure account action is not supported.');
+  if (modeParameter !== 'sign-in' && modeParameter !== 'create-account') throw new Error('This secure account mode is not supported.');
   let api;
   try { api = new URL(apiParameter); } catch { throw new Error('This sign-in request has an invalid UpTier service address.'); }
   if (api.username || api.password || api.search || api.hash || api.pathname !== '/' || !allowedBackendOrigins.includes(api.origin)) {
@@ -208,7 +259,7 @@ async function handlePrimarySignIn(apiOrigin) {
       await sendEmailVerification(result.user);
       await signOut(auth);
       elements.password.value = '';
-      throw new Error('Verify the email we just sent, then return here and sign in again.');
+      throw new Error('Verify the email we just sent, then sign in again below. If this request expires, return to UpTier and start Sign In again.');
     }
     if (multiFactor(result.user).enrolledFactors.length === 0) {
       showPanel(elements.enrollForm);
@@ -230,6 +281,41 @@ async function handlePrimarySignIn(apiOrigin) {
   }
 }
 
+async function handleAccountCreation() {
+  const email = elements.email.value.trim().toLowerCase();
+  const password = elements.password.value;
+  const validationMessage = validateNewPassword(password, elements.confirmPassword.value);
+  if (validationMessage) {
+    setStatus(validationMessage, 'error');
+    (validationMessage === 'Passwords do not match.' ? elements.confirmPassword : elements.password).focus();
+    return;
+  }
+  setStatus('Creating your secure UpTier identity…');
+  const result = await createUserWithEmailAndPassword(auth, email, password);
+  let verificationEmailSent = false;
+  try {
+    await sendEmailVerification(result.user);
+    verificationEmailSent = true;
+  } catch {
+    // The identity already exists. Continue to a recovery state instead of
+    // inviting the user to retry account creation and receive an email-in-use error.
+  }
+  let signedOut = false;
+  try {
+    await signOut(auth);
+    signedOut = true;
+  } catch {
+    // Auth uses memory-only persistence, so closing the page also clears this
+    // session. The recovery message below makes that fallback explicit.
+  }
+  elements.password.value = '';
+  elements.confirmPassword.value = '';
+  resetPasswordVisibility();
+  configureAccountMode('sign-in', { preserveStatus: true });
+  const outcome = accountCreationOutcome(verificationEmailSent, signedOut);
+  setStatus(outcome.message, outcome.tone);
+}
+
 let apiOrigin = '';
 try {
   apiOrigin = validateLaunchRequest();
@@ -243,10 +329,14 @@ try {
     elements.deleteWarning.hidden = false;
     elements.formTitle.textContent = 'Verify permanent deletion';
     elements.createAccount.hidden = true;
+    elements.switchAccountMode.hidden = true;
+    document.body.dataset.accountMode = 'delete-account';
+  } else {
+    configureAccountMode(accountMode);
   }
   elements.requestState.textContent = 'Request verified';
   elements.requestState.dataset.tone = 'success';
-  setStatus(deletionMode ? 'Sign in to re-verify permanent account deletion.' : 'Use your UpTier account email and password to continue.');
+  if (deletionMode) setStatus('Sign in to re-verify permanent account deletion.');
   showPanel(elements.accountForm);
   elements.email.focus();
 } catch (error) {
@@ -258,24 +348,34 @@ try {
 elements.accountForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   setBusy(true);
-  setStatus('Checking your account…');
-  try { await handlePrimarySignIn(apiOrigin); }
+  if (accountMode === 'sign-in') setStatus('Checking your account…');
+  try {
+    if (accountMode === 'create-account' && !deletionMode) await handleAccountCreation();
+    else await handlePrimarySignIn(apiOrigin);
+  }
   catch (error) { setStatus(error instanceof Error && !error.code ? error.message : cleanError(error), 'error'); }
   finally { setBusy(false); }
 });
 
-elements.createAccount.addEventListener('click', async () => {
-  setBusy(true);
-  setStatus('Creating the private-trial identity…');
-  try {
-    const result = await createUserWithEmailAndPassword(auth, elements.email.value.trim().toLowerCase(), elements.password.value);
-    elements.password.value = '';
-    await sendEmailVerification(result.user);
-    await signOut(auth);
-    setStatus('Account created. Verify the email we sent, then return here and sign in to add SMS MFA.', 'success');
-  } catch (error) { setStatus(cleanError(error), 'error'); }
-  finally { setBusy(false); }
+elements.switchAccountMode.addEventListener('click', () => {
+  configureAccountMode(accountMode === 'create-account' ? 'sign-in' : 'create-account');
+  elements.password.value = '';
+  resetPasswordVisibility();
+  elements.password.focus();
 });
+
+for (const button of document.querySelectorAll('[data-password-toggle]')) {
+  button.addEventListener('click', () => {
+    const input = document.querySelector(`#${button.dataset.passwordToggle}`);
+    if (!(input instanceof HTMLInputElement)) return;
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    button.textContent = showing ? 'Show' : 'Hide';
+    button.setAttribute('aria-pressed', String(!showing));
+    button.setAttribute('aria-label', `${showing ? 'Show' : 'Hide'} ${input === elements.confirmPassword ? 'confirmed password' : 'password'}`);
+    input.focus();
+  });
+}
 
 elements.resendVerification.addEventListener('click', async () => {
   const email = elements.email.value.trim().toLowerCase();

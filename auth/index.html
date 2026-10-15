@@ -45,13 +45,31 @@
 
         <form id="account-form" class="auth-form" hidden>
           <label>Email address<input id="email" name="email" type="email" autocomplete="username" maxlength="254" required /></label>
-          <label>Password<input id="password" name="password" type="password" autocomplete="current-password" minlength="12" maxlength="128" required /></label>
+          <div class="auth-field">
+            <label for="password">Password</label>
+            <span class="auth-password-field">
+              <input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required />
+              <button class="auth-password-toggle" type="button" data-password-toggle="password" aria-controls="password" aria-pressed="false" aria-label="Show password">Show</button>
+            </span>
+          </div>
+          <div id="confirm-password-field" class="auth-field" hidden>
+            <label for="confirm-password">Confirm password</label>
+            <span class="auth-password-field">
+              <input id="confirm-password" name="confirm-password" type="password" autocomplete="new-password" maxlength="128" />
+              <button class="auth-password-toggle" type="button" data-password-toggle="confirm-password" aria-controls="confirm-password" aria-pressed="false" aria-label="Show confirmed password">Show</button>
+            </span>
+          </div>
+          <p id="password-guidance" class="auth-password-guidance" hidden>Use 12 to 128 characters. A long, unique passphrase is easiest to remember.</p>
           <div class="auth-actions">
             <button id="sign-in" class="auth-button primary" type="submit">Sign in</button>
-            <button id="create-account" class="auth-button secondary" type="button">Create private-trial account</button>
+            <button id="create-account" class="auth-button primary" type="submit" hidden>Create account</button>
           </div>
-          <button id="resend-verification" class="auth-text-button" type="button">Resend verification email</button>
-          <button id="reset-password" class="auth-text-button" type="button">Send password reset email</button>
+          <button id="switch-account-mode" class="auth-text-button" type="button">Create a new account instead</button>
+          <div id="sign-in-help" class="auth-recovery-actions">
+            <strong>Can’t sign in?</strong>
+            <button id="reset-password" class="auth-button secondary" type="button">Reset password by email</button>
+            <button id="resend-verification" class="auth-text-button" type="button">Resend verification email</button>
+          </div>
         </form>
 
         <form id="enroll-form" class="auth-form" hidden>
