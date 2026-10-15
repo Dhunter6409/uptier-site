@@ -26,7 +26,10 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Validate public pages
-        run: node scripts/check-site.mjs
+        run: |
+          node --check auth/app.js
+          node --test scripts/account-flow.test.mjs
+          node scripts/check-site.mjs
       - name: Stage public files
         run: |
           mkdir _site
