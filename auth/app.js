@@ -18,6 +18,8 @@ import {
   signOut
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 import {
+  NEW_ACCOUNT_PASSWORD_MAX_LENGTH,
+  NEW_ACCOUNT_PASSWORD_MIN_LENGTH,
   SETUP_MEMORY_TIMEOUT_MS,
   accountCreationOutcome,
   accountModeForRequest,
@@ -214,9 +216,12 @@ function configureAccountMode(mode, options = {}) {
     : 'Google Identity verifies your email and second factor in this browser. UpTier receives only a short-lived identity proof and exchanges it for its own protected session.';
   elements.formTitle.textContent = creating ? 'Create your account' : 'Sign in to UpTier';
   elements.password.autocomplete = creating ? 'new-password' : 'current-password';
-  elements.password.minLength = creating ? 12 : 0;
+  elements.password.minLength = creating ? NEW_ACCOUNT_PASSWORD_MIN_LENGTH : 0;
+  elements.password.maxLength = creating ? NEW_ACCOUNT_PASSWORD_MAX_LENGTH : 128;
   elements.confirmPasswordField.hidden = !creating;
   elements.confirmPassword.required = creating;
+  elements.confirmPassword.minLength = creating ? NEW_ACCOUNT_PASSWORD_MIN_LENGTH : 0;
+  elements.confirmPassword.maxLength = NEW_ACCOUNT_PASSWORD_MAX_LENGTH;
   elements.confirmPassword.value = '';
   elements.passwordGuidance.hidden = !creating;
   elements.signIn.hidden = creating;
@@ -225,7 +230,7 @@ function configureAccountMode(mode, options = {}) {
   elements.switchAccountMode.textContent = creating ? 'Already have an account? Sign in instead' : 'New to UpTier? Create an account';
   if (!options.preserveStatus) {
     setStatus(creating
-      ? 'Enter your email and create a unique password with 12 to 128 characters.'
+      ? 'Enter your email and create a unique password with 8 to 20 characters.'
       : 'Use your UpTier account email and password to continue.');
   }
 }
@@ -265,7 +270,7 @@ function cleanError(error) {
     'auth/too-many-requests': 'Too many attempts were made. Stop retrying for now. If a verification email was already sent, use that link—your account is still waiting safely.',
     'auth/unauthorized-domain': 'This UpTier sign-in address is not authorized. Contact UpTier support.',
     'auth/user-disabled': 'This account is disabled. Contact UpTier support.',
-    'auth/weak-password': 'Use a stronger password with at least 12 characters.'
+    'auth/weak-password': 'Use a password containing 8 to 20 characters.'
   };
   if (messages[code]) return messages[code];
   const supportCode = code.replace(/^auth\//, '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);

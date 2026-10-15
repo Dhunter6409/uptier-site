@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  NEW_ACCOUNT_PASSWORD_MAX_LENGTH,
+  NEW_ACCOUNT_PASSWORD_MIN_LENGTH,
   SETUP_MEMORY_TIMEOUT_MS,
   VERIFICATION_RESEND_COOLDOWN_MS,
   accountCreationOutcome,
@@ -17,10 +19,15 @@ test('account creation remains isolated from sign-in and deletion', () => {
 });
 
 test('new passwords must match and remain within the supported length', () => {
-  const validPassword = 'correct horse battery staple';
-  assert.match(validateNewPassword('too-short', 'too-short'), /between 12 and 128/);
-  assert.match(validateNewPassword(validPassword, `${validPassword}!`), /do not match/);
-  assert.equal(validateNewPassword(validPassword, validPassword), '');
+  const minimumPassword = 'A1b2C3d4';
+  const maximumPassword = 'A1b2C3d4E5f6G7h8I9j0';
+  assert.equal(NEW_ACCOUNT_PASSWORD_MIN_LENGTH, 8);
+  assert.equal(NEW_ACCOUNT_PASSWORD_MAX_LENGTH, 20);
+  assert.match(validateNewPassword('A1b2C3d', 'A1b2C3d'), /between 8 and 20/);
+  assert.match(validateNewPassword(`${maximumPassword}K`, `${maximumPassword}K`), /between 8 and 20/);
+  assert.match(validateNewPassword(minimumPassword, `${minimumPassword}!`), /do not match/);
+  assert.equal(validateNewPassword(minimumPassword, minimumPassword), '');
+  assert.equal(validateNewPassword(maximumPassword, maximumPassword), '');
 });
 
 test('account creation tells users to remain in the same verification flow', () => {

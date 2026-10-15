@@ -2,6 +2,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  NEW_ACCOUNT_PASSWORD_MAX_LENGTH,
+  NEW_ACCOUNT_PASSWORD_MIN_LENGTH,
   SETUP_MEMORY_TIMEOUT_MS,
   VERIFICATION_RESEND_COOLDOWN_MS,
   accountCreationOutcome,
@@ -89,18 +91,31 @@ if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath)) {
     if (!authPortalMarkup.includes(required)) errors.push(`Secure account markup is missing invariant: ${required}`);
   }
 
-  const validPassword = 'correct horse battery staple';
+  const validPassword = 'A1b2C3d4';
   if (accountModeForRequest('create-account', false) !== 'create-account') {
     errors.push('Secure account portal must honor an explicit account-creation request.');
   }
   if (accountModeForRequest('create-account', true) !== 'sign-in') {
     errors.push('Permanent deletion must remain isolated from account-creation mode.');
   }
-  if (!validateNewPassword('too-short', 'too-short') || !validateNewPassword(validPassword, `${validPassword}!`)) {
+  if (NEW_ACCOUNT_PASSWORD_MIN_LENGTH !== 8
+      || NEW_ACCOUNT_PASSWORD_MAX_LENGTH !== 20
+      || !validateNewPassword('A1b2C3d', 'A1b2C3d')
+      || !validateNewPassword('A1b2C3d4E5f6G7h8I9j0K', 'A1b2C3d4E5f6G7h8I9j0K')
+      || !validateNewPassword(validPassword, `${validPassword}!`)) {
     errors.push('Secure account creation must reject short or mismatched passwords.');
   }
   if (validateNewPassword(validPassword, validPassword)) {
     errors.push('Secure account creation must accept a matching password within the allowed length.');
+  }
+  const configureAccountModeStart = authPortal.indexOf('function configureAccountMode');
+  const resetPasswordVisibilityStart = authPortal.indexOf('function resetPasswordVisibility', configureAccountModeStart);
+  const configureAccountMode = authPortal.slice(configureAccountModeStart, resetPasswordVisibilityStart);
+  if (!configureAccountMode.includes('elements.password.minLength = creating ? NEW_ACCOUNT_PASSWORD_MIN_LENGTH : 0')
+      || !configureAccountMode.includes('elements.password.maxLength = creating ? NEW_ACCOUNT_PASSWORD_MAX_LENGTH : 128')
+      || !authPortalMarkup.includes('id="password" name="password" type="password" autocomplete="current-password" maxlength="128"')
+      || !authPortalMarkup.includes('id="confirm-password" name="confirm-password" type="password" autocomplete="new-password" minlength="8" maxlength="20"')) {
+    errors.push('New-account password fields must enforce 8 to 20 characters without limiting existing-account sign-in below 128.');
   }
   const deliveryFailure = accountCreationOutcome(false);
   const creationSuccess = accountCreationOutcome(true);
@@ -134,6 +149,15 @@ if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath)) {
     errors.push('Secure account portal is missing the expected sign-in and account-creation boundaries.');
   } else {
     if (/sendEmailVerification/.test(primarySignIn)) errors.push('Unverified sign-in must not automatically send another verification email.');
+    if (/validateNewPassword/.test(primarySignIn)
+        || !primarySignIn.includes('signInWithEmailAndPassword(auth, email, password)')) {
+      errors.push('Existing-account sign-in must accept the prior password range without applying new-account length validation.');
+    }
+    const newPasswordValidationAt = accountCreation.indexOf('validateNewPassword(password, elements.confirmPassword.value)');
+    const createIdentityAt = accountCreation.indexOf('createUserWithEmailAndPassword(auth, email, password)');
+    if (newPasswordValidationAt === -1 || createIdentityAt === -1 || newPasswordValidationAt > createIdentityAt) {
+      errors.push('Account creation must validate the 8 to 20 character password before creating the identity.');
+    }
     if (!/rememberPendingIdentity\(result\.user, password\)[\s\S]*showVerificationStep\(result\.user, false, expectedIdentity\)/.test(primarySignIn)) {
       errors.push('Unverified sign-in must retain the memory-only setup session and show the verification step.');
     }

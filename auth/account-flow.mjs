@@ -1,9 +1,14 @@
+export const NEW_ACCOUNT_PASSWORD_MIN_LENGTH = 8;
+export const NEW_ACCOUNT_PASSWORD_MAX_LENGTH = 20;
+
 export function accountModeForRequest(modeParameter, deletionMode) {
   return modeParameter === 'create-account' && !deletionMode ? 'create-account' : 'sign-in';
 }
 
 export function validateNewPassword(password, confirmation) {
-  if (password.length < 12 || password.length > 128) return 'Password must be between 12 and 128 characters.';
+  if (password.length < NEW_ACCOUNT_PASSWORD_MIN_LENGTH || password.length > NEW_ACCOUNT_PASSWORD_MAX_LENGTH) {
+    return `Password must be between ${NEW_ACCOUNT_PASSWORD_MIN_LENGTH} and ${NEW_ACCOUNT_PASSWORD_MAX_LENGTH} characters.`;
+  }
   if (password !== confirmation) return 'Passwords do not match.';
   return '';
 }

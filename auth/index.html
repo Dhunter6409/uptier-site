@@ -55,11 +55,11 @@
           <div id="confirm-password-field" class="auth-field" hidden>
             <label for="confirm-password">Confirm password</label>
             <span class="auth-password-field">
-              <input id="confirm-password" name="confirm-password" type="password" autocomplete="new-password" maxlength="128" />
+              <input id="confirm-password" name="confirm-password" type="password" autocomplete="new-password" minlength="8" maxlength="20" />
               <button class="auth-password-toggle" type="button" data-password-toggle="confirm-password" aria-controls="confirm-password" aria-pressed="false" aria-label="Show confirmed password">Show</button>
             </span>
           </div>
-          <p id="password-guidance" class="auth-password-guidance" hidden>Use 12 to 128 characters. A long, unique passphrase is easiest to remember.</p>
+          <p id="password-guidance" class="auth-password-guidance" hidden>Use 8 to 20 characters and make it unique to UpTier.</p>
           <div class="auth-actions">
             <button id="sign-in" class="auth-button primary" type="submit">Sign in</button>
             <button id="create-account" class="auth-button primary" type="submit" hidden>Create account</button>
