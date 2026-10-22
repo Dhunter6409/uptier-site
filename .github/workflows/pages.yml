@@ -28,26 +28,16 @@ jobs:
       - name: Validate public pages
         run: |
           node --check auth/app.js
-          node --test scripts/account-flow.test.mjs
+          node --test scripts/account-flow.test.mjs scripts/hosting-build.test.mjs
           node scripts/check-site.mjs
       - name: Stage public files
         run: |
-          mkdir _site
-          cp index.html styles.css 404.html robots.txt sitemap.xml _site/
-          cp -r assets auth privacy terms support data-deletion app-preview _site/
-          touch _site/.nojekyll
-      - name: Verify staged account and legal pages
-        run: |
-          test -f _site/auth/index.html
-          test -f _site/auth/app.js
-          test -f _site/auth/config.js
-          test -f _site/privacy/index.html
-          test -f _site/terms/index.html
-          test -f _site/data-deletion/index.html
+          node scripts/stage-hosting.mjs
+          node scripts/verify-hosting-build.mjs --expected-source-sha "$GITHUB_SHA"
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: _site
+          path: .firebase-site
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4

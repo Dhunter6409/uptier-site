@@ -1,1 +1,25 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta http-equiv="refresh" content="4;url=/uptier-site/" /><link rel="stylesheet" href="/uptier-site/styles.css" /><title>Page not found | UpTier</title></head><body><main class="shell legal-hero" style="min-height:70vh"><p class="eyebrow">404</p><h1>That page is not here.</h1><p>Return to the public UpTier website.</p><a class="button primary" href="/uptier-site/">Go to UpTier</a></main></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link id="site-styles" rel="stylesheet" href="/uptier-site/styles.css" />
+    <title>Page not found | UpTier</title>
+    <script>
+      window.upTierPublicHome = window.location.hostname === 'dhunter6409.github.io' ? '/uptier-site/' : '/';
+      if (window.upTierPublicHome === '/') document.getElementById('site-styles').href = '/styles.css';
+    </script>
+  </head>
+  <body>
+    <main class="shell legal-hero" style="min-height:70vh">
+      <p class="eyebrow">404</p>
+      <h1>That page is not here.</h1>
+      <p>Return to the public UpTier website.</p>
+      <a id="public-home" class="button primary" href="/uptier-site/">Go to UpTier</a>
+    </main>
+    <script>
+      document.getElementById('public-home').href = window.upTierPublicHome;
+      window.setTimeout(() => window.location.replace(window.upTierPublicHome), 4000);
+    </script>
+  </body>
+</html>
