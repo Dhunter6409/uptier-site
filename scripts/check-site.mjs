@@ -17,7 +17,7 @@ const errors = [];
 
 function walk(directory) {
   return readdirSync(directory)
-    .filter((entry) => entry !== '.git' && entry !== '_site')
+    .filter((entry) => !['.firebase', '.firebase-site', '.git', '_site', 'node_modules'].includes(entry))
     .flatMap((entry) => {
       const candidate = join(directory, entry);
       return statSync(candidate).isDirectory() ? walk(candidate) : [candidate];
