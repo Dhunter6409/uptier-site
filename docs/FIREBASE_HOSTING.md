@@ -23,11 +23,12 @@ if ($expected -notmatch '^[0-9a-f]{40}$') { throw 'A full commit hash is require
 if (git status --porcelain=v1 --untracked-files=all) { throw 'The release worktree is not clean.' }
 
 node --check auth/app.js
+node --check auth/sync-key-flow.mjs
 node --check scripts/stage-hosting.mjs
 node --check scripts/verify-hosting-build.mjs
 node --check scripts/verify-hosting-remote.mjs
 node --check scripts/read-hosting-channel-version.mjs
-node --test scripts/account-flow.test.mjs scripts/hosting-build.test.mjs
+node --test scripts/account-flow.test.mjs scripts/hosting-build.test.mjs scripts/sync-key-flow.test.mjs
 node scripts/check-site.mjs
 node scripts/stage-hosting.mjs
 $buildEvidence = node scripts/verify-hosting-build.mjs --expected-source-sha $expected | ConvertFrom-Json

@@ -28,7 +28,8 @@ jobs:
       - name: Validate public pages
         run: |
           node --check auth/app.js
-          node --test scripts/account-flow.test.mjs scripts/hosting-build.test.mjs
+          node --check auth/sync-key-flow.mjs
+          node --test scripts/account-flow.test.mjs scripts/hosting-build.test.mjs scripts/sync-key-flow.test.mjs
           node scripts/check-site.mjs
       - name: Stage public files
         run: |
