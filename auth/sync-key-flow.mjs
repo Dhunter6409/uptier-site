@@ -7,10 +7,13 @@ export const PASSWORD_KDF_ITERATIONS = 600_000;
 export const PASSWORD_KDF_SALT_BYTES = 16;
 export const DEVICE_NONCE_BYTES = 32;
 export const HANDOFF_IV_BYTES = 12;
+export const APP_BOUND_AUTH_KIND = 'ios-app-bound-pkce-v1';
+export const APP_BOUND_CALLBACK_URL = 'com.uptier.app.auth://account-sign-in/callback';
 
 const requestIdPattern = /^[A-Za-z0-9_-]{43}$/;
 const accountIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const coordinatePattern = /^[A-Za-z0-9_-]{43}$/;
+const authorizationCodePrefix = 'uptier_app_auth_';
 
 function cryptoApi() {
   const value = globalThis.crypto;
@@ -135,7 +138,17 @@ export function parseSyncLaunchFragment(fragment, options) {
     maximumEncodedCharacters: 4096 - '#sync='.length,
     maximumDecodedBytes: 3072
   });
-  requireExactKeys(parsed, [
+  const appBound = parsed?.schemaVersion === 2;
+  requireExactKeys(parsed, appBound ? [
+    'schemaVersion',
+    'requestId',
+    'backendOrigin',
+    'expiresAt',
+    'deviceNonceBase64url',
+    'deviceConfirmationHash',
+    'devicePublicJwk',
+    'appBoundAuth'
+  ] : [
     'schemaVersion',
     'requestId',
     'backendOrigin',
@@ -144,7 +157,8 @@ export function parseSyncLaunchFragment(fragment, options) {
     'deviceConfirmationHash',
     'devicePublicJwk'
   ], 'The account-sync handoff');
-  if (parsed.schemaVersion !== SYNC_HANDOFF_SCHEMA_VERSION || !requestIdPattern.test(parsed.requestId ?? '')) {
+  if ((!appBound && parsed.schemaVersion !== SYNC_HANDOFF_SCHEMA_VERSION)
+      || !requestIdPattern.test(parsed.requestId ?? '')) {
     throw new Error('The account-sync handoff version or request is invalid.');
   }
   const backendOrigin = cleanOrigin(parsed.backendOrigin, 'The account-sync backend');
@@ -156,15 +170,73 @@ export function parseSyncLaunchFragment(fragment, options) {
   base64UrlDecode(parsed.deviceNonceBase64url, DEVICE_NONCE_BYTES, 'The account-sync device nonce');
   base64UrlDecode(parsed.deviceConfirmationHash, 32, 'The device confirmation hash');
   const devicePublicJwk = normalizeP256PublicJwk(parsed.devicePublicJwk);
+  let appBoundAuth;
+  if (appBound) {
+    requireExactKeys(parsed.appBoundAuth, [
+      'kind', 'callbackUrl', 'state', 'codeChallenge', 'codeChallengeMethod'
+    ], 'The app-bound authorization request');
+    if (parsed.appBoundAuth.kind !== APP_BOUND_AUTH_KIND
+        || parsed.appBoundAuth.callbackUrl !== APP_BOUND_CALLBACK_URL
+        || parsed.appBoundAuth.codeChallengeMethod !== 'S256') {
+      throw new Error('The app-bound authorization request is unsupported.');
+    }
+    base64UrlDecode(parsed.appBoundAuth.state, 32, 'The app-bound authorization state');
+    base64UrlDecode(parsed.appBoundAuth.codeChallenge, 32, 'The app-bound authorization challenge');
+    appBoundAuth = Object.freeze({
+      kind: APP_BOUND_AUTH_KIND,
+      callbackUrl: APP_BOUND_CALLBACK_URL,
+      state: parsed.appBoundAuth.state,
+      codeChallenge: parsed.appBoundAuth.codeChallenge,
+      codeChallengeMethod: 'S256'
+    });
+  }
   return Object.freeze({
-    schemaVersion: SYNC_HANDOFF_SCHEMA_VERSION,
+    schemaVersion: parsed.schemaVersion,
     requestId: parsed.requestId,
     backendOrigin,
     expiresAt,
     deviceNonceBase64url: parsed.deviceNonceBase64url,
     deviceConfirmationHash: parsed.deviceConfirmationHash,
-    devicePublicJwk
+    devicePublicJwk,
+    ...(appBoundAuth ? { appBoundAuth } : {})
   });
+}
+
+export function normalizeAppBoundAuthorizeResponse(value, syncContext, now = Date.now()) {
+  if (!syncContext?.appBoundAuth) throw new Error('The app-bound authorization context is unavailable.');
+  requireExactKeys(value, ['authorizationCode', 'requestId', 'expiresAt'], 'The app-bound authorization response');
+  if (typeof value.authorizationCode !== 'string' || !value.authorizationCode.startsWith(authorizationCodePrefix)) {
+    throw new Error('The app-bound authorization code is invalid.');
+  }
+  base64UrlDecode(
+    value.authorizationCode.slice(authorizationCodePrefix.length),
+    32,
+    'The app-bound authorization code'
+  );
+  if (value.requestId !== syncContext.requestId) {
+    throw new Error('The app-bound authorization response belongs to a different request.');
+  }
+  const expiresAt = cleanExpiry(value.expiresAt, now);
+  if (Date.parse(expiresAt) > Date.parse(syncContext.expiresAt)) {
+    throw new Error('The app-bound authorization response outlives the UpTier request.');
+  }
+  return Object.freeze({
+    authorizationCode: value.authorizationCode,
+    requestId: value.requestId,
+    expiresAt
+  });
+}
+
+export function createAppBoundCallbackUrl(syncContext, authorizeResponse, now = Date.now()) {
+  const normalized = normalizeAppBoundAuthorizeResponse(authorizeResponse, syncContext, now);
+  const appBoundAuth = syncContext.appBoundAuth;
+  if (appBoundAuth.callbackUrl !== APP_BOUND_CALLBACK_URL) {
+    throw new Error('The app-bound callback is unsupported.');
+  }
+  const callback = new URL(APP_BOUND_CALLBACK_URL);
+  callback.searchParams.set('authorization_code', normalized.authorizationCode);
+  callback.searchParams.set('state', appBoundAuth.state);
+  return callback.toString();
 }
 
 export async function verifyDeviceConfirmationCode(code, syncContext) {

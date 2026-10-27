@@ -78,6 +78,9 @@ if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath) || !existsS
     'parseSyncLaunchFragment(launchSyncFragment',
     'await verifySyncDeviceConfirmation()',
     '/v1/auth/browser/prepare',
+    '/v1/auth/browser/authorize',
+    'createAppBoundCallbackUrl(syncLaunchContext, payload)',
+    'window.location.replace(callbackUrl)',
     'completeDeviceHandoffIfCurrent({'
   ]) {
     if (!authPortal.includes(required)) errors.push(`Secure account portal is missing invariant: ${required}`);
@@ -258,21 +261,45 @@ if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath) || !existsS
   const phoneClaimAt = backendExchange.indexOf("tokenResult.signInSecondFactor !== 'phone'");
   const passwordClaimAt = backendExchange.indexOf("tokenResult.signInProvider !== 'password'");
   const prepareAt = backendExchange.indexOf("fetch(`${apiOrigin}/v1/auth/browser/prepare`");
+  const authorizeDefinitionAt = backendExchange.indexOf("fetch(`${apiOrigin}/v1/auth/browser/authorize`");
   const handoffAt = backendExchange.indexOf('createHandoff: () => createDeviceHandoff');
   const clearSyncPasswordAt = backendExchange.indexOf("pendingSetupPassword = ''", handoffAt);
   const retainHandoffAt = backendExchange.indexOf('pendingDeviceHandoff = deviceHandoff', clearSyncPasswordAt);
-  const completeAt = backendExchange.indexOf('return completeRequest(deviceHandoff)', clearSyncPasswordAt);
+  const legacyCompleteAt = backendExchange.indexOf(': completeRequest(deviceHandoff)', clearSyncPasswordAt);
+  const authorizeAt = backendExchange.indexOf('? authorizeAppBoundRequest(deviceHandoff)', clearSyncPasswordAt);
+  const callbackAt = backendExchange.indexOf('createAppBoundCallbackUrl(syncLaunchContext, payload)', authorizeAt);
+  const redirectAt = backendExchange.indexOf('window.location.replace(callbackUrl)', callbackAt);
   if (backendExchangeStart === -1 || backendExchangeEnd === -1
-      || phoneClaimAt === -1 || passwordClaimAt === -1 || completeAt === -1
-      || !(phoneClaimAt < completeAt && passwordClaimAt < completeAt)) {
+      || phoneClaimAt === -1 || passwordClaimAt === -1
+      || legacyCompleteAt === -1 || authorizeAt === -1
+      || !(phoneClaimAt < legacyCompleteAt && passwordClaimAt < legacyCompleteAt
+        && phoneClaimAt < authorizeAt && passwordClaimAt < authorizeAt)) {
     errors.push('The portal must verify fresh password-primary and phone second-factor claims before the backend exchange.');
   }
-  if (prepareAt === -1 || handoffAt === -1 || clearSyncPasswordAt === -1 || retainHandoffAt === -1
+  if (prepareAt === -1 || authorizeDefinitionAt === -1 || handoffAt === -1
+      || clearSyncPasswordAt === -1 || retainHandoffAt === -1
       || !(phoneClaimAt < prepareAt && passwordClaimAt < prepareAt
         && prepareAt < handoffAt && handoffAt < clearSyncPasswordAt
-        && clearSyncPasswordAt < retainHandoffAt && retainHandoffAt < completeAt)
+        && clearSyncPasswordAt < retainHandoffAt
+        && retainHandoffAt < legacyCompleteAt && retainHandoffAt < authorizeAt)
       || /JSON\.stringify\(\{[^}]*password/i.test(backendExchange)) {
     errors.push('Account sync must derive and encrypt its password key after MFA, clear the temporary password, and never send the password to UpTier.');
+  }
+  if (authorizeDefinitionAt === -1
+      || !backendExchange.includes('pkceChallenge: appBoundSyncLaunch().codeChallenge')
+      || !backendExchange.includes('deviceHandoff')
+      || callbackAt === -1 || redirectAt === -1 || callbackAt > redirectAt
+      || !authPortal.includes('return Boolean(syncLaunchContext && !appBoundSyncLaunch())')
+      || !authPortal.includes('if (requiresManualDeviceConfirmation())')
+      || !authPortal.includes("document.body.dataset.appBoundAuth = 'true'")
+      || !authPortal.includes('elements.syncConfirmationField.hidden = true')
+      || !authPortal.includes('elements.syncConfirmationCode.required = false')
+      || !syncKeyFlow.includes("export const APP_BOUND_CALLBACK_URL = 'com.uptier.app.auth://account-sign-in/callback'")
+      || !syncKeyFlow.includes("parsed.appBoundAuth.codeChallengeMethod !== 'S256'")) {
+    errors.push('App-bound iPhone sign-in must retain SMS MFA, bind the encrypted handoff to PKCE, skip only the legacy device-code prompt, and return only through the fixed UpTier callback.');
+  }
+  if (/console\.|location\.(?:assign|replace)\(syncLaunchContext|callbackUrl\s*=\s*syncLaunchContext\.appBoundAuth\.callbackUrl/.test(backendExchange)) {
+    errors.push('App-bound sign-in must not log secrets or navigate to a callback supplied directly by the launch payload.');
   }
   const lifecycleCreateAt = syncKeyFlow.indexOf('const deviceHandoff = await createHandoff()');
   const lifecycleFirstGuardAt = syncKeyFlow.indexOf('if (!isCurrent())', lifecycleCreateAt);
