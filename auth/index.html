@@ -28,7 +28,7 @@
         <h1 id="auth-title">Sign in without sharing credentials with the desktop app.</h1>
         <p id="auth-lead">Google Identity verifies your email and second factor in this browser. UpTier receives only a short-lived identity proof and exchanges it for its own protected session.</p>
         <ul>
-          <li>Your Google password and SMS code are never sent to the UpTier desktop app.</li>
+          <li>Your password and SMS code stay in this secure browser. After MFA, a one-use derived sync key is encrypted directly to the requesting device.</li>
           <li>The Firebase session uses memory-only persistence and is signed out after the exchange.</li>
           <li>Standard SMS and data rates may apply. Google uses phone numbers for abuse prevention.</li>
         </ul>
@@ -60,6 +60,11 @@
             </span>
           </div>
           <p id="password-guidance" class="auth-password-guidance" hidden>Use 8 to 20 characters and make it unique to UpTier.</p>
+          <div id="sync-confirmation-field" class="auth-field" hidden>
+            <label for="sync-confirmation-code">Six-digit code shown in UpTier</label>
+            <input id="sync-confirmation-code" name="sync-confirmation-code" type="text" autocomplete="off" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" />
+            <p class="auth-password-guidance">Enter only the code shown in the UpTier app you just opened. UpTier support will never ask for this code.</p>
+          </div>
           <div class="auth-actions">
             <button id="sign-in" class="auth-button primary" type="submit">Sign in</button>
             <button id="create-account" class="auth-button primary" type="submit" hidden>Create account</button>
@@ -68,6 +73,7 @@
           <div id="sign-in-help" class="auth-recovery-actions">
             <strong>Can’t sign in?</strong>
             <button id="reset-password" class="auth-button secondary" type="button">Reset password by email</button>
+            <span>Before resetting: an existing encrypted profile will need one already linked device or its sync recovery code. A password reset alone cannot decrypt it.</span>
           </div>
         </form>
 

@@ -23,17 +23,18 @@ if ($expected -notmatch '^[0-9a-f]{40}$') { throw 'A full commit hash is require
 if (git status --porcelain=v1 --untracked-files=all) { throw 'The release worktree is not clean.' }
 
 node --check auth/app.js
+node --check auth/sync-key-flow.mjs
 node --check scripts/stage-hosting.mjs
 node --check scripts/verify-hosting-build.mjs
 node --check scripts/verify-hosting-remote.mjs
 node --check scripts/read-hosting-channel-version.mjs
-node --test scripts/account-flow.test.mjs scripts/hosting-build.test.mjs
+node --test scripts/account-flow.test.mjs scripts/hosting-build.test.mjs scripts/sync-key-flow.test.mjs
 node scripts/check-site.mjs
 node scripts/stage-hosting.mjs
 $buildEvidence = node scripts/verify-hosting-build.mjs --expected-source-sha $expected | ConvertFrom-Json
 ```
 
-The last command fails unless the checked-out commit matches `$expected`, the worktree is clean, the target project/site and headers are exact, the staged path set is exact, and every staged byte matches its source byte. Save `$buildEvidence` with the release record: `contentAggregateSha256` identifies the 23 deployable source files, `stagedArtifactAggregateSha256` also covers the generated `.nojekyll` control file used by GitHub Pages, and `releaseInputAggregateSha256` additionally covers the exact `firebase.json` and `.firebaserc` release configuration.
+The last command fails unless the checked-out commit matches `$expected`, the worktree is clean, the target project/site and headers are exact, the staged path set is exact, and every staged byte matches its source byte. Save `$buildEvidence` with the release record: `contentAggregateSha256` identifies the 24 deployable source files, `stagedArtifactAggregateSha256` also covers the generated `.nojekyll` control file used by GitHub Pages, and `releaseInputAggregateSha256` additionally covers the exact `firebase.json` and `.firebaserc` release configuration.
 
 For pre-commit review only, `node scripts/verify-hosting-build.mjs --allow-dirty` exercises the content checks without claiming an exact releasable commit.
 
@@ -66,7 +67,7 @@ firebase hosting:clone "uptier-502917:@$versionId" "uptier-502917:live" --projec
 node scripts/verify-hosting-remote.mjs --origin https://uptier-502917.web.app --live --expected-source-sha $expected --expected-version-id $versionId
 ```
 
-Confirm that `https://uptier-502917.web.app/auth/` returns the reviewed portal and the remote verifier reports the same commit, immutable version, release-input hash, content aggregate, and all 23 source files. This still does not authorize an app release or any app/backend/Identity configuration change.
+Confirm that `https://uptier-502917.web.app/auth/` returns the reviewed portal and the remote verifier reports the same commit, immutable version, release-input hash, content aggregate, and all 24 source files. This still does not authorize an app release or any app/backend/Identity configuration change.
 
 ## Canonical and client cutover order
 

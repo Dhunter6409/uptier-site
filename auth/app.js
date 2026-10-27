@@ -27,6 +27,13 @@ import {
   verificationResendWaitSeconds
 } from './account-flow.mjs';
 import { allowedBackendOrigins, firebaseConfig } from './config.js';
+import {
+  completeDeviceHandoffIfCurrent,
+  createDeviceHandoff,
+  normalizePrepareResponse,
+  parseSyncLaunchFragment,
+  verifyDeviceConfirmationCode
+} from './sync-key-flow.mjs';
 
 const elements = {
   status: document.querySelector('#status'),
@@ -41,6 +48,8 @@ const elements = {
   confirmPassword: document.querySelector('#confirm-password'),
   confirmPasswordField: document.querySelector('#confirm-password-field'),
   passwordGuidance: document.querySelector('#password-guidance'),
+  syncConfirmationField: document.querySelector('#sync-confirmation-field'),
+  syncConfirmationCode: document.querySelector('#sync-confirmation-code'),
   phone: document.querySelector('#phone'),
   smsConsent: document.querySelector('#sms-consent'),
   smsCode: document.querySelector('#sms-code'),
@@ -74,6 +83,7 @@ const actionParameter = parameters.get('action') ?? 'sign-in';
 const modeParameter = parameters.get('mode') ?? 'sign-in';
 const deletionMode = actionParameter === 'delete-account';
 let accountMode = accountModeForRequest(modeParameter, deletionMode);
+const launchSyncFragment = window.location.hash;
 window.history.replaceState({}, document.title, window.location.pathname);
 
 let auth;
@@ -90,6 +100,9 @@ let busy = false;
 let pendingExchangeUser;
 let setupMemoryTimer;
 let setupGeneration = 0;
+let syncLaunchContext;
+let pendingDeviceHandoff;
+let deviceConfirmationVerified = false;
 
 function setStatus(message, tone = 'working') {
   elements.status.textContent = message;
@@ -129,9 +142,12 @@ function setBusy(nextBusy) {
 
 function clearSensitiveSetupState({ clearIdentity = false } = {}) {
   pendingSetupPassword = '';
+  pendingDeviceHandoff = undefined;
+  deviceConfirmationVerified = false;
   elements.password.value = '';
   elements.confirmPassword.value = '';
   elements.smsCode.value = '';
+  elements.syncConfirmationCode.value = '';
   verificationId = '';
   verificationMode = '';
   signInResolver = undefined;
@@ -140,6 +156,21 @@ function clearSensitiveSetupState({ clearIdentity = false } = {}) {
     pendingIdentity = undefined;
     pendingExchangeUser = undefined;
   }
+}
+
+async function verifySyncDeviceConfirmation() {
+  if (!syncLaunchContext || deviceConfirmationVerified) return;
+  const code = elements.syncConfirmationCode.value;
+  elements.syncConfirmationCode.value = '';
+  if (!/^\d{6}$/.test(code)) {
+    elements.syncConfirmationCode.focus();
+    throw new Error('Enter the six-digit code shown in the UpTier app you just opened.');
+  }
+  if (!await verifyDeviceConfirmationCode(code, syncLaunchContext)) {
+    elements.syncConfirmationCode.focus();
+    throw new Error('That device confirmation code does not match this UpTier request. Return to the app and use the current code.');
+  }
+  deviceConfirmationVerified = true;
 }
 
 async function expireSetupMemory() {
@@ -391,19 +422,30 @@ async function refreshEmailVerification({ announce = false } = {}) {
 function showManualSignInRecovery(message) {
   const email = pendingIdentity?.email ?? '';
   pendingSetupPassword = '';
+  pendingDeviceHandoff = undefined;
+  deviceConfirmationVerified = false;
   verificationId = '';
   verificationMode = '';
   signInResolver = undefined;
   elements.smsCode.value = '';
+  elements.syncConfirmationCode.value = '';
   configureAccountMode('sign-in', { preserveStatus: true });
   showPanel(elements.accountForm);
   elements.email.value = email;
   elements.password.value = '';
   setStatus(message, 'error');
-  elements.password.focus();
+  (syncLaunchContext ? elements.syncConfirmationCode : elements.password).focus();
 }
 
 function showBackendRetry(error) {
+  if (syncLaunchContext && !pendingDeviceHandoff) {
+    deviceConfirmationVerified = false;
+    elements.syncConfirmationCode.value = '';
+    pendingExchangeUser = undefined;
+    void signOut(auth).catch(() => {});
+    showManualSignInRecovery('The protected device handoff did not finish. Enter the current code shown in UpTier and complete one fresh sign-in.');
+    return;
+  }
   elements.completeTitle.textContent = 'Your identity is verified';
   elements.completeMessage.textContent = 'The secure handoff to UpTier did not finish. Keep this page open and retry the handoff—do not sign in again.';
   elements.retryFinish.hidden = false;
@@ -422,7 +464,6 @@ async function beginAutomaticMfaSignIn(expectedIdentity = pendingIdentity) {
   requirePendingIdentity(currentUser, expectedIdentity);
   const { email } = expectedIdentity;
   const password = pendingSetupPassword;
-  pendingSetupPassword = '';
   try {
     await signOut(auth);
   } catch (error) {
@@ -465,13 +506,18 @@ async function beginAutomaticMfaSignIn(expectedIdentity = pendingIdentity) {
 }
 
 async function finishBackendExchange(user, apiOrigin, expectedGeneration = setupGeneration, expectedIdentity = pendingIdentity) {
-  if (!isCurrentSetupGeneration(expectedGeneration)) return false;
+  const originalUserUid = user.uid;
+  const isCurrentExchange = () => (expectedGeneration === setupGeneration
+    && expectedIdentity === pendingIdentity
+    && (!expectedIdentity || expectedIdentity.generation === setupGeneration)
+    && auth.currentUser?.uid === originalUserUid);
+  if (!isCurrentExchange()) return false;
   if (!user.emailVerified || multiFactor(user).enrolledFactors.length === 0) throw new Error('Verified email and SMS MFA are required.');
   if (expectedIdentity) requirePendingIdentity(user, expectedIdentity);
   const tokenResult = await user.getIdTokenResult(true);
-  if (!isCurrentSetupGeneration(expectedGeneration)
-      || (expectedIdentity && !isCurrentPendingIdentity(expectedIdentity))) return false;
+  if (!isCurrentExchange()) return false;
   if (tokenResult.signInSecondFactor !== 'phone') throw new Error('Complete the SMS second-factor challenge before connecting this account to UpTier.');
+  if (tokenResult.signInProvider !== 'password') throw new Error('Use the UpTier email and password before completing SMS verification.');
   if (deletionMode) {
     setStatus('Identity verified. Removing UpTier server data and connected Plaid Items…');
     const idToken = tokenResult.token;
@@ -484,8 +530,7 @@ async function finishBackendExchange(user, apiOrigin, expectedGeneration = setup
       body: JSON.stringify({ requestToken, idToken })
     });
     const payload = await response.json().catch(() => ({}));
-    if (!isCurrentSetupGeneration(expectedGeneration)
-        || (expectedIdentity && !isCurrentPendingIdentity(expectedIdentity))) return false;
+    if (!isCurrentExchange()) return false;
     if (!response.ok) throw new Error(typeof payload.message === 'string' ? payload.message : 'UpTier could not delete this account.');
     try {
       await deleteUser(user);
@@ -509,19 +554,72 @@ async function finishBackendExchange(user, apiOrigin, expectedGeneration = setup
     return true;
   }
   pendingExchangeUser = user;
-  setStatus('SMS verified. Creating a protected UpTier session…');
   const idToken = tokenResult.token;
-  const response = await fetch(`${apiOrigin}/v1/auth/browser/complete`, {
+  const completeRequest = (deviceHandoff) => fetch(`${apiOrigin}/v1/auth/browser/complete`, {
     method: 'POST',
     mode: 'cors',
     credentials: 'omit',
     cache: 'no-store',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requestToken, idToken })
+    body: JSON.stringify({
+      requestToken,
+      idToken,
+      ...(deviceHandoff ? { deviceHandoff } : {})
+    })
   });
+  let response;
+  if (syncLaunchContext && !pendingDeviceHandoff) {
+    if (!deviceConfirmationVerified) {
+      throw new Error('Confirm this device with the six-digit code shown in UpTier before continuing.');
+    }
+    if (!pendingSetupPassword) {
+      throw new Error('The temporary password key expired. Return to UpTier and start one fresh secure sign-in.');
+    }
+    setStatus('SMS verified. Protecting account sync for this device…');
+    const prepareResponse = await fetch(`${apiOrigin}/v1/auth/browser/prepare`, {
+      method: 'POST',
+      mode: 'cors',
+      credentials: 'omit',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestToken, idToken })
+    });
+    const preparePayload = await prepareResponse.json().catch(() => ({}));
+    if (!isCurrentExchange()) return false;
+    if (!prepareResponse.ok) {
+      throw new Error(typeof preparePayload.message === 'string'
+        ? preparePayload.message
+        : 'UpTier could not prepare secure account sync.');
+    }
+    const prepared = normalizePrepareResponse(preparePayload, syncLaunchContext);
+    const guardedCompletion = await completeDeviceHandoffIfCurrent({
+      createHandoff: () => createDeviceHandoff({
+        syncContext: syncLaunchContext,
+        prepareResponse: prepared,
+        password: pendingSetupPassword
+      }),
+      isCurrent: isCurrentExchange,
+      beforeComplete: () => {
+        pendingSetupPassword = '';
+        deviceConfirmationVerified = false;
+        setStatus('Account sync protected. Creating the UpTier session…');
+      },
+      complete: (deviceHandoff) => {
+        pendingDeviceHandoff = deviceHandoff;
+        return completeRequest(deviceHandoff);
+      }
+    });
+    if (!guardedCompletion.completed) return false;
+    response = guardedCompletion.result;
+  } else {
+    setStatus(syncLaunchContext
+      ? 'Account sync protected. Creating the UpTier session…'
+      : 'SMS verified. Creating a protected UpTier session…');
+    if (!isCurrentExchange()) return false;
+    response = await completeRequest(pendingDeviceHandoff);
+  }
   const payload = await response.json().catch(() => ({}));
-  if (!isCurrentSetupGeneration(expectedGeneration)
-      || (expectedIdentity && !isCurrentPendingIdentity(expectedIdentity))) return false;
+  if (!isCurrentExchange()) return false;
   if (!response.ok) throw new Error(typeof payload.message === 'string' ? payload.message : 'UpTier could not complete this sign-in.');
   await signOut(auth);
   if (!isCurrentSetupGeneration(expectedGeneration)
@@ -569,8 +667,15 @@ async function handlePrimarySignIn(apiOrigin) {
   } catch (error) {
     if (operationGeneration !== setupGeneration) return;
     if (error?.code !== 'auth/multi-factor-auth-required') throw error;
-    pendingSetupPassword = '';
-    await prepareMfaChallenge(error, undefined, operationGeneration);
+    pendingSetupPassword = syncLaunchContext ? password : '';
+    elements.password.value = '';
+    resetPasswordVisibility();
+    try {
+      await prepareMfaChallenge(error, undefined, operationGeneration);
+    } catch (challengeError) {
+      pendingSetupPassword = '';
+      throw challengeError;
+    }
   }
 }
 
@@ -610,6 +715,15 @@ async function handleAccountCreation() {
 let apiOrigin = '';
 try {
   apiOrigin = validateLaunchRequest();
+  if (launchSyncFragment) {
+    if (deletionMode) throw new Error('Account-sync handoff is not allowed during account deletion.');
+    syncLaunchContext = parseSyncLaunchFragment(launchSyncFragment, {
+      allowedBackendOrigins,
+      expectedBackendOrigin: apiOrigin
+    });
+    elements.syncConfirmationField.hidden = false;
+    elements.syncConfirmationCode.required = true;
+  }
   const firebaseApp = initializeApp(firebaseConfig);
   auth = initializeAuth(firebaseApp, { persistence: inMemoryPersistence });
   armSetupMemoryDeadline();
@@ -642,10 +756,17 @@ elements.accountForm.addEventListener('submit', async (event) => {
   setBusy(true);
   if (accountMode === 'sign-in') setStatus('Checking your account…');
   try {
+    await verifySyncDeviceConfirmation();
     if (accountMode === 'create-account' && !deletionMode) await handleAccountCreation();
     else await handlePrimarySignIn(apiOrigin);
   }
-  catch (error) { setStatus(error instanceof Error && !error.code ? error.message : cleanError(error), 'error'); }
+  catch (error) {
+    if (syncLaunchContext && !pendingDeviceHandoff) {
+      deviceConfirmationVerified = false;
+      elements.syncConfirmationCode.value = '';
+    }
+    setStatus(error instanceof Error && !error.code ? error.message : cleanError(error), 'error');
+  }
   finally { setBusy(false); }
 });
 
@@ -727,10 +848,17 @@ elements.useDifferentEmail.addEventListener('click', async () => {
 elements.resetPassword.addEventListener('click', async () => {
   const email = elements.email.value.trim().toLowerCase();
   if (!email) return setStatus('Enter your email address first.', 'error');
+  const confirmed = window.confirm(
+    'Resetting the password cannot unlock an existing encrypted UpTier profile by itself. '
+    + 'After the reset, use a device that is already linked or your sync recovery code once. Continue?'
+  );
+  if (!confirmed) return;
+  deviceConfirmationVerified = false;
+  elements.syncConfirmationCode.value = '';
   setBusy(true);
   try {
     await sendPasswordResetEmail(auth, email);
-    setStatus('If that account exists, a password reset email has been sent.', 'success');
+    setStatus('If that account exists, a password reset email has been sent. Keep an already linked device or the sync recovery code available to restore the encrypted profile.', 'success');
   } catch (error) { setStatus(cleanError(error), 'error'); }
   finally { setBusy(false); }
 });
