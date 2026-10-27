@@ -225,6 +225,17 @@ if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath) || !existsS
     errors.push('Automatic post-enrollment sign-in must retain the password only in memory through the required Firebase MFA challenge.');
   }
 
+  const smsSendStart = authPortal.indexOf('async function sendMfaCode');
+  const smsSendEnd = authPortal.indexOf('function showVerificationStep', smsSendStart);
+  const smsSend = authPortal.slice(smsSendStart, smsSendEnd);
+  if (smsSendStart === -1 || smsSendEnd === -1
+      || !smsSend.includes('const provider = new PhoneAuthProvider(auth)')
+      || !smsSend.includes('await provider.verifyPhoneNumber(options, recaptchaVerifier)')
+      || !smsSend.includes("setStatus('Security code sent. It may take a moment to arrive.', 'success')")
+      || !authPortal.includes('enter only the security code sent to your phone. No separate code from the app is required')) {
+    errors.push('iPhone sign-in must request a Firebase SMS code and clearly omit the separate UpTier device-code prompt.');
+  }
+
   const enrollmentStart = authPortal.indexOf("elements.enrollForm.addEventListener('submit'");
   const codeStart = authPortal.indexOf("elements.codeForm.addEventListener('submit'", enrollmentStart);
   const enrollmentHandler = authPortal.slice(enrollmentStart, codeStart);
@@ -385,3 +396,4 @@ if (errors.length) {
 }
 
 console.log(`Validated ${htmlFiles.length} HTML pages and ${files.length} public repository files.`);
+
