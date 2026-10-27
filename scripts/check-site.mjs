@@ -43,6 +43,7 @@ if (!existsSync(previewIndexPath)) {
 const authConfigPath = join(root, 'auth', 'config.js');
 const authPortalPath = join(root, 'auth', 'app.js');
 const authPortalMarkupPath = join(root, 'auth', 'index.html');
+const syncKeyFlowPath = join(root, 'auth', 'sync-key-flow.mjs');
 const premiumReturnPaths = [
   join(root, 'premium', 'index.html'),
   join(root, 'premium', 'success', 'index.html'),
@@ -58,11 +59,12 @@ if (!existsSync(authConfigPath)) {
   }
 }
 
-if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath)) {
+if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath) || !existsSync(syncKeyFlowPath)) {
   errors.push('Missing secure account portal implementation.');
 } else {
   const authPortal = readFileSync(authPortalPath, 'utf8');
   const authPortalMarkup = readFileSync(authPortalMarkupPath, 'utf8');
+  const syncKeyFlow = readFileSync(syncKeyFlowPath, 'utf8');
   for (const required of [
     "parameters.get('mode') ?? 'sign-in'",
     "actionParameter !== 'sign-in' && actionParameter !== 'delete-account'",
@@ -71,7 +73,12 @@ if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath)) {
     'showVerificationStep(result.user, verificationEmailSent, expectedIdentity)',
     'await reload(user)',
     'await beginAutomaticMfaSignIn(expectedIdentity)',
-    "tokenResult.signInSecondFactor !== 'phone'"
+    "tokenResult.signInSecondFactor !== 'phone'",
+    "tokenResult.signInProvider !== 'password'",
+    'parseSyncLaunchFragment(launchSyncFragment',
+    'await verifySyncDeviceConfirmation()',
+    '/v1/auth/browser/prepare',
+    'completeDeviceHandoffIfCurrent({'
   ]) {
     if (!authPortal.includes(required)) errors.push(`Secure account portal is missing invariant: ${required}`);
   }
@@ -81,12 +88,14 @@ if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath)) {
     'autocomplete="new-password"',
     'data-password-toggle="password"',
     'id="reset-password"',
+    'id="sync-confirmation-code"',
     'id="verification-panel"',
     'id="verification-address"',
     'id="check-verification"',
     'id="resend-verification"',
     'id="retry-finish"',
-    'Do not create the account or sign in again.'
+    'Do not create the account or sign in again.',
+    'UpTier support will never ask for this code.'
   ]) {
     if (!authPortalMarkup.includes(required)) errors.push(`Secure account markup is missing invariant: ${required}`);
   }
@@ -139,6 +148,27 @@ if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath)) {
   if (/localStorage|sessionStorage|indexedDB/.test(authPortal)) {
     errors.push('The secure account portal must never persist temporary credentials or auth state in browser storage.');
   }
+  for (const required of [
+    "'P-256-HKDF-SHA256-AES-256-GCM'",
+    "encoder.encode('UpTier password key v1\\0')",
+    "encoder.encode(`UpTier profile sync key handoff v1\\0${contextJson}`)",
+    "purpose: 'uptier-profile-sync-password-key-handoff'",
+    '`UpTier device confirmation v1\\0${syncContext.requestId}\\0${code}`',
+    'deviceConfirmationHash: value.deviceConfirmationHash',
+    'fragment.length > 4096',
+    'maximumDecodedBytes: 3072',
+    'iterations: PASSWORD_KDF_ITERATIONS',
+    "hash: 'SHA-256'"
+  ]) {
+    if (!syncKeyFlow.includes(required)) errors.push(`Secure account-sync crypto is missing invariant: ${required}`);
+  }
+  if (/localStorage|sessionStorage|indexedDB|console\./.test(syncKeyFlow)
+      || /password\s*[:,]\s*password/i.test(syncKeyFlow)) {
+    errors.push('Account-sync cryptography must not persist or log passwords or key material.');
+  }
+  if (/JSON\.stringify\([^)]*syncConfirmationCode|body:[\s\S]{0,240}syncConfirmationCode/.test(authPortal)) {
+    errors.push('The six-digit device confirmation code must never leave the auth portal.');
+  }
 
   const primarySignInStart = authPortal.indexOf('async function handlePrimarySignIn');
   const accountCreationStart = authPortal.indexOf('async function handleAccountCreation', primarySignInStart);
@@ -183,14 +213,13 @@ if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath)) {
   const automaticReplayStart = authPortal.indexOf('async function beginAutomaticMfaSignIn');
   const backendExchangeStart = authPortal.indexOf('async function finishBackendExchange', automaticReplayStart);
   const automaticReplay = authPortal.slice(automaticReplayStart, backendExchangeStart);
-  const clearPasswordAt = automaticReplay.indexOf("pendingSetupPassword = ''");
   const signOutAt = automaticReplay.indexOf('await signOut(auth)');
   const replayAt = automaticReplay.indexOf('await signInWithEmailAndPassword(auth, email, password)');
   if (automaticReplayStart === -1 || backendExchangeStart === -1
-      || clearPasswordAt === -1 || signOutAt === -1 || replayAt === -1
-      || !(clearPasswordAt < signOutAt && signOutAt < replayAt)
+      || signOutAt === -1 || replayAt === -1 || signOutAt > replayAt
+      || automaticReplay.includes("pendingSetupPassword = ''")
       || !automaticReplay.includes("error?.code !== 'auth/multi-factor-auth-required'")) {
-    errors.push('Automatic post-enrollment sign-in must clear the password first and advance only through Firebase MFA-required.');
+    errors.push('Automatic post-enrollment sign-in must retain the password only in memory through the required Firebase MFA challenge.');
   }
 
   const enrollmentStart = authPortal.indexOf("elements.enrollForm.addEventListener('submit'");
@@ -226,10 +255,37 @@ if (!existsSync(authPortalPath) || !existsSync(authPortalMarkupPath)) {
 
   const backendExchangeEnd = authPortal.indexOf('async function handlePrimarySignIn', backendExchangeStart);
   const backendExchange = authPortal.slice(backendExchangeStart, backendExchangeEnd);
+  const phoneClaimAt = backendExchange.indexOf("tokenResult.signInSecondFactor !== 'phone'");
+  const passwordClaimAt = backendExchange.indexOf("tokenResult.signInProvider !== 'password'");
+  const prepareAt = backendExchange.indexOf("fetch(`${apiOrigin}/v1/auth/browser/prepare`");
+  const handoffAt = backendExchange.indexOf('createHandoff: () => createDeviceHandoff');
+  const clearSyncPasswordAt = backendExchange.indexOf("pendingSetupPassword = ''", handoffAt);
+  const retainHandoffAt = backendExchange.indexOf('pendingDeviceHandoff = deviceHandoff', clearSyncPasswordAt);
+  const completeAt = backendExchange.indexOf('return completeRequest(deviceHandoff)', clearSyncPasswordAt);
   if (backendExchangeStart === -1 || backendExchangeEnd === -1
-      || backendExchange.indexOf("tokenResult.signInSecondFactor !== 'phone'") === -1
-      || backendExchange.indexOf("tokenResult.signInSecondFactor !== 'phone'") > backendExchange.indexOf("fetch(`${apiOrigin}/v1/auth/browser/complete`")) {
-    errors.push('The portal must verify a fresh phone second-factor claim before the backend exchange.');
+      || phoneClaimAt === -1 || passwordClaimAt === -1 || completeAt === -1
+      || !(phoneClaimAt < completeAt && passwordClaimAt < completeAt)) {
+    errors.push('The portal must verify fresh password-primary and phone second-factor claims before the backend exchange.');
+  }
+  if (prepareAt === -1 || handoffAt === -1 || clearSyncPasswordAt === -1 || retainHandoffAt === -1
+      || !(phoneClaimAt < prepareAt && passwordClaimAt < prepareAt
+        && prepareAt < handoffAt && handoffAt < clearSyncPasswordAt
+        && clearSyncPasswordAt < retainHandoffAt && retainHandoffAt < completeAt)
+      || /JSON\.stringify\(\{[^}]*password/i.test(backendExchange)) {
+    errors.push('Account sync must derive and encrypt its password key after MFA, clear the temporary password, and never send the password to UpTier.');
+  }
+  const lifecycleCreateAt = syncKeyFlow.indexOf('const deviceHandoff = await createHandoff()');
+  const lifecycleFirstGuardAt = syncKeyFlow.indexOf('if (!isCurrent())', lifecycleCreateAt);
+  const lifecycleTransitionAt = syncKeyFlow.indexOf('beforeComplete()', lifecycleFirstGuardAt);
+  const lifecycleSecondGuardAt = syncKeyFlow.indexOf('if (!isCurrent())', lifecycleTransitionAt);
+  const lifecycleCompleteAt = syncKeyFlow.indexOf('await complete(deviceHandoff)', lifecycleSecondGuardAt);
+  if (lifecycleCreateAt === -1 || lifecycleFirstGuardAt === -1 || lifecycleTransitionAt === -1
+      || lifecycleSecondGuardAt === -1 || lifecycleCompleteAt === -1
+      || !(lifecycleCreateAt < lifecycleFirstGuardAt && lifecycleFirstGuardAt < lifecycleTransitionAt
+        && lifecycleTransitionAt < lifecycleSecondGuardAt && lifecycleSecondGuardAt < lifecycleCompleteAt)
+      || !backendExchange.includes('auth.currentUser?.uid === originalUserUid')
+      || !backendExchange.includes('expectedIdentity === pendingIdentity')) {
+    errors.push('Device handoff completion must fail closed after crypto and immediately before complete when setup identity changes.');
   }
   if (!authPortal.includes('pendingExchangeUser = user;')
       || !authPortal.includes("elements.retryFinish.addEventListener('click'")) {

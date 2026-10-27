@@ -31,6 +31,7 @@ export const PUBLIC_FILES = Object.freeze([
   'auth/config.js',
   'auth/index.html',
   'auth/styles.css',
+  'auth/sync-key-flow.mjs',
   'data-deletion/index.html',
   'index.html',
   'premium/cancel/index.html',
