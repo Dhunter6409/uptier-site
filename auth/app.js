@@ -29,6 +29,7 @@ import {
 import { allowedBackendOrigins, firebaseConfig } from './config.js';
 import {
   completeDeviceHandoffIfCurrent,
+  createAppBoundCallbackUrl,
   createDeviceHandoff,
   normalizePrepareResponse,
   parseSyncLaunchFragment,
@@ -104,6 +105,14 @@ let syncLaunchContext;
 let pendingDeviceHandoff;
 let deviceConfirmationVerified = false;
 
+function appBoundSyncLaunch() {
+  return syncLaunchContext?.appBoundAuth;
+}
+
+function requiresManualDeviceConfirmation() {
+  return Boolean(syncLaunchContext && !appBoundSyncLaunch());
+}
+
 function setStatus(message, tone = 'working') {
   elements.status.textContent = message;
   elements.status.dataset.tone = tone;
@@ -159,7 +168,7 @@ function clearSensitiveSetupState({ clearIdentity = false } = {}) {
 }
 
 async function verifySyncDeviceConfirmation() {
-  if (!syncLaunchContext || deviceConfirmationVerified) return;
+  if (!requiresManualDeviceConfirmation() || deviceConfirmationVerified) return;
   const code = elements.syncConfirmationCode.value;
   elements.syncConfirmationCode.value = '';
   if (!/^\d{6}$/.test(code)) {
@@ -244,7 +253,9 @@ function configureAccountMode(mode, options = {}) {
     : 'Sign in without sharing credentials with the desktop app.';
   elements.introLead.textContent = creating
     ? 'Choose your email and a unique password here in the secure browser. After email verification, UpTier adds SMS protection before connecting the account to the app.'
-    : 'Google Identity verifies your email and second factor in this browser. UpTier receives only a short-lived identity proof and exchanges it for its own protected session.';
+    : appBoundSyncLaunch()
+      ? 'Sign in with your UpTier email and password, then enter only the security code sent to your phone. No separate code from the app is required; after SMS verification, this page returns directly to UpTier.'
+      : 'Google Identity verifies your email and second factor in this browser. UpTier receives only a short-lived identity proof and exchanges it for its own protected session.';
   elements.formTitle.textContent = creating ? 'Create your account' : 'Sign in to UpTier';
   elements.password.autocomplete = creating ? 'new-password' : 'current-password';
   elements.password.minLength = creating ? NEW_ACCOUNT_PASSWORD_MIN_LENGTH : 0;
@@ -434,11 +445,11 @@ function showManualSignInRecovery(message) {
   elements.email.value = email;
   elements.password.value = '';
   setStatus(message, 'error');
-  (syncLaunchContext ? elements.syncConfirmationCode : elements.password).focus();
+  (requiresManualDeviceConfirmation() ? elements.syncConfirmationCode : elements.password).focus();
 }
 
 function showBackendRetry(error) {
-  if (syncLaunchContext && !pendingDeviceHandoff) {
+  if (requiresManualDeviceConfirmation() && !pendingDeviceHandoff) {
     deviceConfirmationVerified = false;
     elements.syncConfirmationCode.value = '';
     pendingExchangeUser = undefined;
@@ -567,9 +578,23 @@ async function finishBackendExchange(user, apiOrigin, expectedGeneration = setup
       ...(deviceHandoff ? { deviceHandoff } : {})
     })
   });
+  const authorizeAppBoundRequest = (deviceHandoff) => fetch(`${apiOrigin}/v1/auth/browser/authorize`, {
+    method: 'POST',
+    mode: 'cors',
+    credentials: 'omit',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      requestToken,
+      idToken,
+      pkceChallenge: appBoundSyncLaunch().codeChallenge,
+      deviceHandoff
+    })
+  });
+  const appBoundAuth = appBoundSyncLaunch();
   let response;
   if (syncLaunchContext && !pendingDeviceHandoff) {
-    if (!deviceConfirmationVerified) {
+    if (requiresManualDeviceConfirmation() && !deviceConfirmationVerified) {
       throw new Error('Confirm this device with the six-digit code shown in UpTier before continuing.');
     }
     if (!pendingSetupPassword) {
@@ -602,25 +627,47 @@ async function finishBackendExchange(user, apiOrigin, expectedGeneration = setup
       beforeComplete: () => {
         pendingSetupPassword = '';
         deviceConfirmationVerified = false;
-        setStatus('Account sync protected. Creating the UpTier session…');
+        setStatus(appBoundAuth
+          ? 'Account sync protected. Returning securely to UpTier…'
+          : 'Account sync protected. Creating the UpTier session…');
       },
       complete: (deviceHandoff) => {
         pendingDeviceHandoff = deviceHandoff;
-        return completeRequest(deviceHandoff);
+        return appBoundAuth
+          ? authorizeAppBoundRequest(deviceHandoff)
+          : completeRequest(deviceHandoff);
       }
     });
     if (!guardedCompletion.completed) return false;
     response = guardedCompletion.result;
   } else {
-    setStatus(syncLaunchContext
-      ? 'Account sync protected. Creating the UpTier session…'
+    setStatus(appBoundAuth
+      ? 'Account sync protected. Returning securely to UpTier…'
+      : syncLaunchContext
+        ? 'Account sync protected. Creating the UpTier session…'
       : 'SMS verified. Creating a protected UpTier session…');
     if (!isCurrentExchange()) return false;
-    response = await completeRequest(pendingDeviceHandoff);
+    response = appBoundAuth
+      ? await authorizeAppBoundRequest(pendingDeviceHandoff)
+      : await completeRequest(pendingDeviceHandoff);
   }
   const payload = await response.json().catch(() => ({}));
   if (!isCurrentExchange()) return false;
   if (!response.ok) throw new Error(typeof payload.message === 'string' ? payload.message : 'UpTier could not complete this sign-in.');
+  if (appBoundAuth) {
+    const callbackUrl = createAppBoundCallbackUrl(syncLaunchContext, payload);
+    await signOut(auth);
+    if (!isCurrentSetupGeneration(expectedGeneration)
+        || (expectedIdentity && !isCurrentPendingIdentity(expectedIdentity))) return false;
+    pendingExchangeUser = undefined;
+    clearSetupMemoryDeadline();
+    clearSensitiveSetupState({ clearIdentity: true });
+    elements.requestState.textContent = 'Verified';
+    elements.requestState.dataset.tone = 'success';
+    setStatus('SMS verified. Returning securely to the UpTier app…', 'success');
+    window.location.replace(callbackUrl);
+    return true;
+  }
   await signOut(auth);
   if (!isCurrentSetupGeneration(expectedGeneration)
       || (expectedIdentity && !isCurrentPendingIdentity(expectedIdentity))) return false;
@@ -721,8 +768,14 @@ try {
       allowedBackendOrigins,
       expectedBackendOrigin: apiOrigin
     });
-    elements.syncConfirmationField.hidden = false;
-    elements.syncConfirmationCode.required = true;
+    if (requiresManualDeviceConfirmation()) {
+      elements.syncConfirmationField.hidden = false;
+      elements.syncConfirmationCode.required = true;
+    } else {
+      document.body.dataset.appBoundAuth = 'true';
+      elements.syncConfirmationField.hidden = true;
+      elements.syncConfirmationCode.required = false;
+    }
   }
   const firebaseApp = initializeApp(firebaseConfig);
   auth = initializeAuth(firebaseApp, { persistence: inMemoryPersistence });
@@ -761,7 +814,7 @@ elements.accountForm.addEventListener('submit', async (event) => {
     else await handlePrimarySignIn(apiOrigin);
   }
   catch (error) {
-    if (syncLaunchContext && !pendingDeviceHandoff) {
+    if (requiresManualDeviceConfirmation() && !pendingDeviceHandoff) {
       deviceConfirmationVerified = false;
       elements.syncConfirmationCode.value = '';
     }

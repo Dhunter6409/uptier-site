@@ -2,14 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  APP_BOUND_AUTH_KIND,
+  APP_BOUND_CALLBACK_URL,
   PASSWORD_KDF_ITERATIONS,
   SYNC_HANDOFF_SUITE,
   base64UrlEncode,
   canonicalJson,
   completeDeviceHandoffIfCurrent,
+  createAppBoundCallbackUrl,
   createDeviceHandoff,
   derivePasswordKey,
   openDeviceHandoff,
+  normalizeAppBoundAuthorizeResponse,
   parseSyncLaunchFragment,
   p256PublicKeySha256,
   verifyDeviceConfirmationCode
@@ -22,6 +26,9 @@ const requestId = base64UrlEncode(Uint8Array.from({ length: 32 }, (_, index) => 
 const deviceNonceBase64url = base64UrlEncode(Uint8Array.from({ length: 32 }, (_, index) => 255 - index));
 const deviceConfirmationHash = 'xI7-rpuzqEwlYlRz-4hUBVroNoe6qostMMmfGZEV9cU';
 const expiresAt = '2026-01-01T00:05:00.000Z';
+const appBoundState = base64UrlEncode(new Uint8Array(32).fill(41));
+const appBoundCodeChallenge = base64UrlEncode(new Uint8Array(32).fill(42));
+const authorizationCode = `uptier_app_auth_${base64UrlEncode(new Uint8Array(32).fill(43))}`;
 const passwordKdf = Object.freeze({
   schemaVersion: 1,
   name: 'PBKDF2',
@@ -70,6 +77,20 @@ function syncContext(overrides = {}) {
 
 function prepareResponse(overrides = {}) {
   return { requestId, accountId, expiresAt, passwordKdf, ...overrides };
+}
+
+function appBoundSyncContext(overrides = {}) {
+  return syncContext({
+    schemaVersion: 2,
+    appBoundAuth: {
+      kind: APP_BOUND_AUTH_KIND,
+      callbackUrl: APP_BOUND_CALLBACK_URL,
+      state: appBoundState,
+      codeChallenge: appBoundCodeChallenge,
+      codeChallengeMethod: 'S256'
+    },
+    ...overrides
+  });
 }
 
 async function importPair(publicJwk, privateJwk) {
@@ -130,6 +151,59 @@ test('six-digit device confirmation is checked locally without accepting near ma
   assert.equal(await verifyDeviceConfirmationCode('123457', syncContext()), false);
   assert.equal(await verifyDeviceConfirmationCode('12345', syncContext()), false);
   assert.equal(await verifyDeviceConfirmationCode('123456 ', syncContext()), false);
+});
+
+test('app-bound launch fragments require the fixed callback, canonical state, and S256 challenge', () => {
+  const parsed = parseSyncLaunchFragment(fragmentFor(appBoundSyncContext()), {
+    allowedBackendOrigins: [backendOrigin], expectedBackendOrigin: backendOrigin, now
+  });
+  assert.deepEqual(parsed, appBoundSyncContext());
+
+  for (const appBoundAuth of [
+    { ...appBoundSyncContext().appBoundAuth, callbackUrl: 'https://evil.example/callback' },
+    { ...appBoundSyncContext().appBoundAuth, callbackUrl: 'com.uptier.app.auth://evil/callback' },
+    { ...appBoundSyncContext().appBoundAuth, callbackUrl: `${APP_BOUND_CALLBACK_URL}?next=https://evil.example` },
+    { ...appBoundSyncContext().appBoundAuth, callbackUrl: `${APP_BOUND_CALLBACK_URL}#attacker` },
+    { ...appBoundSyncContext().appBoundAuth, state: base64UrlEncode(new Uint8Array(31)) },
+    { ...appBoundSyncContext().appBoundAuth, state: `${appBoundState}=` },
+    { ...appBoundSyncContext().appBoundAuth, codeChallenge: base64UrlEncode(new Uint8Array(31)) },
+    { ...appBoundSyncContext().appBoundAuth, codeChallenge: `${appBoundCodeChallenge}=` },
+    { ...appBoundSyncContext().appBoundAuth, codeChallengeMethod: 'plain' },
+    { ...appBoundSyncContext().appBoundAuth, kind: 'unsupported' }
+  ]) {
+    assert.throws(() => parseSyncLaunchFragment(fragmentFor({ ...appBoundSyncContext(), appBoundAuth }), {
+      allowedBackendOrigins: [backendOrigin], expectedBackendOrigin: backendOrigin, now
+    }), /app-bound authorization|invalid/);
+  }
+  assert.throws(() => parseSyncLaunchFragment(fragmentFor({
+    ...appBoundSyncContext(), appBoundAuth: { ...appBoundSyncContext().appBoundAuth, extra: true }
+  }), { allowedBackendOrigins: [backendOrigin], expectedBackendOrigin: backendOrigin, now }), /unsupported format/);
+  for (const missing of ['state', 'codeChallenge']) {
+    const appBoundAuth = { ...appBoundSyncContext().appBoundAuth };
+    delete appBoundAuth[missing];
+    assert.throws(() => parseSyncLaunchFragment(fragmentFor({ ...appBoundSyncContext(), appBoundAuth }), {
+      allowedBackendOrigins: [backendOrigin], expectedBackendOrigin: backendOrigin, now
+    }), /unsupported format/);
+  }
+});
+
+test('app-bound authorization response redirects only code and bound state to the fixed app callback', () => {
+  const context = appBoundSyncContext();
+  const response = { authorizationCode, requestId, expiresAt: '2026-01-01T00:04:00.000Z' };
+  assert.deepEqual(normalizeAppBoundAuthorizeResponse(response, context, now), response);
+  const callback = new URL(createAppBoundCallbackUrl(context, response, now));
+  assert.equal(`${callback.protocol}//${callback.host}${callback.pathname}`, APP_BOUND_CALLBACK_URL);
+  assert.deepEqual([...callback.searchParams.keys()].sort(), ['authorization_code', 'state']);
+  assert.equal(callback.searchParams.get('authorization_code'), authorizationCode);
+  assert.equal(callback.searchParams.get('state'), appBoundState);
+  assert.equal(callback.hash, '');
+
+  assert.throws(() => normalizeAppBoundAuthorizeResponse({ ...response, requestId: base64UrlEncode(new Uint8Array(32).fill(9)) }, context, now), /different request/);
+  assert.throws(() => normalizeAppBoundAuthorizeResponse({ ...response, authorizationCode: 'attacker-code' }, context, now), /invalid/);
+  assert.throws(() => normalizeAppBoundAuthorizeResponse({ ...response, authorizationCode: `${authorizationCode.slice(0, -1)}B` }, context, now), /canonical/);
+  assert.throws(() => normalizeAppBoundAuthorizeResponse({ ...response, expiresAt: '2026-01-01T00:06:00.000Z' }, context, now), /outlives/);
+  assert.throws(() => normalizeAppBoundAuthorizeResponse({ ...response, extra: true }, context, now), /unsupported format/);
+  assert.throws(() => createAppBoundCallbackUrl(syncContext(), response, now), /context is unavailable/);
 });
 
 test('password-key derivation is deterministic and bound to backend, account, and salt', async () => {
